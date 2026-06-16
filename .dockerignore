@@ -1,0 +1,19 @@
+# Ignore general files
+.git
+.gitignore
+.env
+Dockerfile
+.dockerignore
+
+# Ignore Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+
+# Ignore Node artifacts
+frontend/node_modules/
+frontend/.next/
+frontend/.turbo/
+frontend/dist/

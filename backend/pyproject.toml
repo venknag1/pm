@@ -1,0 +1,18 @@
+[project]
+name = "pm-backend"
+version = "0.1.0"
+description = "FastAPI backend for the Project Management MVP"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.111.1",
+  "uvicorn[standard]>=0.23.0",
+  "python-dotenv>=1.0.0",
+  "openai>=1.0.0"
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.0",
+  "httpx>=0.26.0"
+]
