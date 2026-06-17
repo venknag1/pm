@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(.venv/bin/uv pip *)",
+      "Bash(.venv/bin/pip install *)",
+      "Bash(uv pip *)",
+      "Bash(.venv/bin/python *)",
+      "Bash(.venv/bin/pytest *)",
+      "Bash(./scripts/start.sh)"
+    ]
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "database": "SQLite",
+  "file": "pm.db",
+  "tables": {
+    "users": {
+      "columns": {
+        "id":            { "type": "INTEGER", "primaryKey": true, "autoIncrement": true },
+        "username":      { "type": "TEXT",    "unique": true, "nullable": false },
+        "password_hash": { "type": "TEXT",    "nullable": false },
+        "created_at":    { "type": "TEXT",    "nullable": false, "note": "ISO-8601" }
+      }
+    },
+    "boards": {
+      "columns": {
+        "id":         { "type": "INTEGER", "primaryKey": true, "autoIncrement": true },
+        "user_id":    { "type": "INTEGER", "nullable": false, "unique": true, "references": "users.id" },
+        "created_at": { "type": "TEXT",    "nullable": false, "note": "ISO-8601" }
+      }
+    },
+    "columns": {
+      "columns": {
+        "id":       { "type": "TEXT",    "primaryKey": true, "note": "e.g. col-backlog" },
+        "board_id": { "type": "INTEGER", "nullable": false, "references": "boards.id" },
+        "title":    { "type": "TEXT",    "nullable": false },
+        "position": { "type": "INTEGER", "nullable": false, "note": "0-based display order" }
+      }
+    },
+    "cards": {
+      "columns": {
+        "id":        { "type": "TEXT",    "primaryKey": true, "note": "e.g. card-abc123" },
+        "board_id":  { "type": "INTEGER", "nullable": false, "references": "boards.id" },
+        "column_id": { "type": "TEXT",    "nullable": false, "references": "columns.id" },
+        "title":     { "type": "TEXT",    "nullable": false },
+        "details":   { "type": "TEXT",    "nullable": false, "default": "" },
+        "position":  { "type": "INTEGER", "nullable": false, "note": "0-based within column" }
+      }
+    }
+  }
+}

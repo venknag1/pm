@@ -17,7 +17,7 @@ RUN apt-get update \
 RUN python -m pip install --no-cache-dir uv
 
 COPY backend/pyproject.toml ./backend/pyproject.toml
-RUN uv pip install --system fastapi uvicorn[standard] python-dotenv
+RUN uv pip install --system fastapi uvicorn[standard] python-dotenv bcrypt itsdangerous openai
 
 COPY backend/ ./backend
 COPY --from=frontend-builder /app/frontend/out ./backend/public
