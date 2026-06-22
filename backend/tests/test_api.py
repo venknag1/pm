@@ -1687,3 +1687,88 @@ class TestBoardExport:
         client.post("/api/auth/logout")
         resp = client.get("/api/boards/1/export")
         assert resp.status_code == 401
+
+
+class TestGlobalSearch:
+    def _setup(self, auth_client):
+        board1_id = auth_client.post("/api/boards", json={"title": "Alpha"}).json()["id"]
+        board2_id = auth_client.post("/api/boards", json={"title": "Beta"}).json()["id"]
+        b1 = auth_client.get(f"/api/boards/{board1_id}").json()
+        b2 = auth_client.get(f"/api/boards/{board2_id}").json()
+        col1 = b1["columns"][0]["id"]
+        col2 = b2["columns"][0]["id"]
+        auth_client.post(f"/api/boards/{board1_id}/cards", json={"column_id": col1, "title": "Fix login bug"})
+        auth_client.post(f"/api/boards/{board1_id}/cards", json={"column_id": col1, "title": "Design dashboard"})
+        auth_client.post(f"/api/boards/{board2_id}/cards", json={"column_id": col2, "title": "Deploy staging"})
+        return board1_id, board2_id
+
+    def test_search_finds_cards(self, auth_client):
+        self._setup(auth_client)
+        results = auth_client.get("/api/search?q=login").json()
+        titles = [r["title"] for r in results]
+        assert "Fix login bug" in titles
+
+    def test_search_across_boards(self, auth_client):
+        self._setup(auth_client)
+        results = auth_client.get("/api/search?q=de").json()
+        board_titles = {r["board_title"] for r in results}
+        assert len(board_titles) > 0
+
+    def test_search_returns_board_context(self, auth_client):
+        self._setup(auth_client)
+        results = auth_client.get("/api/search?q=login").json()
+        assert results[0]["board_title"] == "Alpha"
+        assert results[0]["column_title"] is not None
+
+    def test_search_no_cross_user_leakage(self, client, admin_client):
+        admin_board_id = admin_client.get("/api/boards").json()[0]["id"]
+        board = admin_client.get(f"/api/boards/{admin_board_id}").json()
+        col_id = board["columns"][0]["id"]
+        admin_client.post(f"/api/boards/{admin_board_id}/cards", json={"column_id": col_id, "title": "AdminSecret"})
+        client.post("/api/auth/login", json={"username": "user", "password": "password"})
+        results = client.get("/api/search?q=AdminSecret").json()
+        assert len(results) == 0
+
+    def test_search_requires_min_length(self, auth_client):
+        resp = auth_client.get("/api/search?q=x")
+        assert resp.status_code == 400
+
+    def test_search_not_in_archived(self, auth_client):
+        self._setup(auth_client)
+        boards = auth_client.get("/api/boards").json()
+        board_id = next(b["id"] for b in boards if b["title"] == "Alpha")
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        col_id = board["columns"][0]["id"]
+        card_id = auth_client.post(f"/api/boards/{board_id}/cards", json={"column_id": col_id, "title": "ArchivedCard"}).json()["id"]
+        auth_client.post(f"/api/cards/{card_id}/archive")
+        results = auth_client.get("/api/search?q=ArchivedCard").json()
+        assert len(results) == 0
+
+    def test_search_unauthenticated_fails(self, client):
+        client.post("/api/auth/logout")
+        resp = client.get("/api/search?q=test")
+        assert resp.status_code == 401
+
+
+class TestBoardCompletion:
+    def test_done_count_in_boards_list(self, auth_client):
+        board_id = auth_client.post("/api/boards", json={"title": "Progress Board", "template": "kanban"}).json()["id"]
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        todo_col = board["columns"][0]["id"]
+        done_col = board["columns"][-1]["id"]
+        auth_client.post(f"/api/boards/{board_id}/cards", json={"column_id": todo_col, "title": "Not done"})
+        auth_client.post(f"/api/boards/{board_id}/cards", json={"column_id": done_col, "title": "Done card"})
+        boards = auth_client.get("/api/boards").json()
+        target = next(b for b in boards if b["id"] == board_id)
+        assert target["card_count"] == 2
+        assert target["done_count"] == 1
+
+    def test_archived_excluded_from_counts(self, auth_client):
+        board_id = auth_client.post("/api/boards", json={"title": "Archive Board"}).json()["id"]
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        col_id = board["columns"][0]["id"]
+        card_id = auth_client.post(f"/api/boards/{board_id}/cards", json={"column_id": col_id, "title": "Will archive"}).json()["id"]
+        auth_client.post(f"/api/cards/{card_id}/archive")
+        boards = auth_client.get("/api/boards").json()
+        target = next(b for b in boards if b["id"] == board_id)
+        assert target["card_count"] == 0

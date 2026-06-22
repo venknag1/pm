@@ -52,6 +52,20 @@ class BoardSummary(BaseModel):
     title: str
     created_at: str
     card_count: int = 0
+    done_count: int = 0
+
+
+class CardSearchResult(BaseModel):
+    id: str
+    title: str
+    details: str
+    board_id: int
+    board_title: str
+    column_title: str
+    priority: str
+    label: str | None = None
+    due_date: str | None = None
+    story_points: int | None = None
 
 
 class RenameColumnRequest(BaseModel):

@@ -10,6 +10,7 @@ export type BoardSummary = {
   title: string;
   created_at: string;
   card_count: number;
+  done_count: number;
 };
 
 export type UserSummary = {
@@ -411,5 +412,26 @@ export type BoardExport = { board: string; exported_at: string; columns: BoardEx
 export async function exportBoard(boardId: number): Promise<BoardExport> {
   const resp = await request(`/api/boards/${boardId}/export`);
   if (!resp.ok) throw new Error("Failed to export board");
+  return resp.json();
+}
+
+// --- Global search ---
+
+export type CardSearchResult = {
+  id: string;
+  title: string;
+  details: string;
+  board_id: number;
+  board_title: string;
+  column_title: string;
+  priority: string;
+  label: string | null;
+  due_date: string | null;
+  story_points: number | null;
+};
+
+export async function searchCards(q: string): Promise<CardSearchResult[]> {
+  const resp = await request(`/api/search?q=${encodeURIComponent(q)}`);
+  if (!resp.ok) throw new Error("Search failed");
   return resp.json();
 }

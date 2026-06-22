@@ -11,7 +11,7 @@ vi.mock("@/lib/api", () => ({
   archiveCard: vi.fn().mockResolvedValue(undefined),
   moveCardToBoard: vi.fn().mockResolvedValue(undefined),
   duplicateCard: vi.fn().mockResolvedValue({ id: "card-new" }),
-  listBoards: vi.fn().mockResolvedValue([{ id: 2, title: "Other Board", created_at: new Date().toISOString(), card_count: 0 }]),
+  listBoards: vi.fn().mockResolvedValue([{ id: 2, title: "Other Board", created_at: new Date().toISOString(), card_count: 0, done_count: 0 }]),
   getChecklist: vi.fn().mockResolvedValue([]),
   addChecklistItem: vi.fn().mockResolvedValue({ id: "chk-1", title: "New item", completed: false, position: 0 }),
   updateChecklistItem: vi.fn().mockResolvedValue({ id: "chk-1", title: "New item", completed: true, position: 0 }),

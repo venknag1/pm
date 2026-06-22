@@ -14,6 +14,7 @@ import {
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
 import { AISidebar } from "@/components/AISidebar";
+import { SearchModal } from "@/components/SearchModal";
 import { moveCard, type BoardData, type Card } from "@/lib/kanban";
 import {
   getBoardById,
@@ -60,6 +61,7 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
   const [filter, setFilter] = useState<FilterState>({ search: "", priority: "all", label: "", assignee: "", overdue: false });
   const [showFilter, setShowFilter] = useState(false);
   const [users, setUsers] = useState<UserBrief[]>([]);
+  const [showSearch, setShowSearch] = useState(false);
   const [showStats, setShowStats] = useState(false);
   const [stats, setStats] = useState<BoardStats | null>(null);
   const [showActivity, setShowActivity] = useState(false);
@@ -351,6 +353,17 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowSearch(true)}
+              className="flex items-center gap-2 rounded-xl border border-[var(--stroke)] bg-[var(--surface)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.15em] text-[var(--gray-text)] transition hover:border-[var(--primary-blue)] hover:text-[var(--primary-blue)]"
+              title="Search cards"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.4"/>
+                <path d="M9.5 9.5L13 13" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+              </svg>
+              Search
+            </button>
             <button
               onClick={handleToggleStats}
               className={`flex items-center gap-2 rounded-xl border px-4 py-2 text-xs font-semibold uppercase tracking-[0.15em] transition ${
@@ -712,6 +725,15 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
           boardId={boardId}
           onClose={() => setSidebarOpen(false)}
           onBoardUpdate={(updatedBoard) => setBoard(updatedBoard)}
+        />
+      )}
+      {showSearch && (
+        <SearchModal
+          onClose={() => setShowSearch(false)}
+          onSelectBoard={(newBoardId, newBoardTitle) => {
+            setShowSearch(false);
+            if (newBoardId !== boardId) onBack();
+          }}
         />
       )}
     </div>

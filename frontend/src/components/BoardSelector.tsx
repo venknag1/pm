@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { listBoards, createBoard, deleteBoard, renameBoard, type BoardSummary } from "@/lib/api";
 import { ChangePasswordForm } from "@/components/ChangePasswordForm";
+import { SearchModal } from "@/components/SearchModal";
 
 type BoardSelectorProps = {
   onSelectBoard: (boardId: number, boardTitle: string) => void;
@@ -28,6 +29,7 @@ export const BoardSelector = ({
   const [renameTitle, setRenameTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [showProfile, setShowProfile] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
 
   useEffect(() => {
     listBoards()
@@ -41,7 +43,7 @@ export const BoardSelector = ({
     if (!newBoardTitle.trim()) return;
     try {
       const created = await createBoard(newBoardTitle.trim(), selectedTemplate || undefined);
-      setBoards((prev) => [...prev, { ...created, created_at: new Date().toISOString(), card_count: 0 }]);
+      setBoards((prev) => [...prev, { ...created, created_at: new Date().toISOString(), card_count: 0, done_count: 0 }]);
       setNewBoardTitle("");
       setSelectedTemplate("");
       setCreatingBoard(false);
@@ -94,6 +96,7 @@ export const BoardSelector = ({
   }
 
   return (
+    <>
     <div className="relative overflow-hidden">
       <div className="pointer-events-none absolute left-0 top-0 h-[420px] w-[420px] -translate-x-1/3 -translate-y-1/3 rounded-full bg-[radial-gradient(circle,_rgba(32,157,215,0.25)_0%,_rgba(32,157,215,0.05)_55%,_transparent_70%)]" />
       <div className="pointer-events-none absolute bottom-0 right-0 h-[520px] w-[520px] translate-x-1/4 translate-y-1/4 rounded-full bg-[radial-gradient(circle,_rgba(117,57,145,0.18)_0%,_rgba(117,57,145,0.05)_55%,_transparent_75%)]" />
@@ -112,6 +115,17 @@ export const BoardSelector = ({
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowSearch(true)}
+              className="flex items-center gap-2 rounded-xl border border-[var(--stroke)] bg-[var(--surface)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.15em] text-[var(--gray-text)] transition hover:border-[var(--primary-blue)] hover:text-[var(--primary-blue)]"
+              title="Search cards (across all boards)"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.4"/>
+                <path d="M9.5 9.5L13 13" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+              </svg>
+              Search
+            </button>
             {isAdmin && (
               <button
                 onClick={onAdminPanel}
@@ -286,6 +300,19 @@ export const BoardSelector = ({
                 <span>{board.card_count} {board.card_count === 1 ? "card" : "cards"}</span>
                 <span>{new Date(board.created_at).toLocaleDateString()}</span>
               </div>
+              {board.card_count > 0 && (
+                <div className="flex items-center gap-2">
+                  <div className="h-1 flex-1 overflow-hidden rounded-full bg-[var(--stroke)]">
+                    <div
+                      className="h-full rounded-full bg-emerald-500 transition-all"
+                      style={{ width: `${Math.round((board.done_count / board.card_count) * 100)}%` }}
+                    />
+                  </div>
+                  <span className="text-[10px] font-semibold text-emerald-600">
+                    {Math.round((board.done_count / board.card_count) * 100)}%
+                  </span>
+                </div>
+              )}
             </div>
           ))}
 
@@ -297,5 +324,16 @@ export const BoardSelector = ({
         </div>
       </main>
     </div>
+
+    {showSearch && (
+      <SearchModal
+        onClose={() => setShowSearch(false)}
+        onSelectBoard={(boardId, boardTitle) => {
+          setShowSearch(false);
+          onSelectBoard(boardId, boardTitle);
+        }}
+      />
+    )}
+    </>
   );
 };

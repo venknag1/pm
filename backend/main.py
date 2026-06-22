@@ -25,6 +25,7 @@ from .models import (
     BoardResponse,
     BoardStats,
     BoardSummary,
+    CardSearchResult,
     BoardUpdate,
     CardComment,
     CardData,
@@ -455,13 +456,31 @@ def list_boards(user_id: int = Depends(get_current_user_id), db=Depends(get_db))
     result = []
     for board in boards:
         card_count = db.execute(
-            "SELECT COUNT(*) FROM cards WHERE board_id = ?", (board["id"],)
+            "SELECT COUNT(*) FROM cards WHERE board_id = ? AND archived = 0",
+            (board["id"],),
         ).fetchone()[0]
+        # "done" column = last column, or one titled done/complete/completed
+        cols = db.execute(
+            "SELECT id, title FROM columns WHERE board_id = ? ORDER BY position",
+            (board["id"],),
+        ).fetchall()
+        done_col_id = cols[-1]["id"] if cols else None
+        for col in cols:
+            if col["title"].lower() in ("done", "complete", "completed"):
+                done_col_id = col["id"]
+                break
+        done_count = 0
+        if done_col_id:
+            done_count = db.execute(
+                "SELECT COUNT(*) FROM cards WHERE column_id = ? AND archived = 0",
+                (done_col_id,),
+            ).fetchone()[0]
         result.append(BoardSummary(
             id=board["id"],
             title=board["title"],
             created_at=board["created_at"],
             card_count=card_count,
+            done_count=done_count,
         ))
     return result
 
@@ -1277,6 +1296,49 @@ def get_board_stats(
 def list_users(user_id: int = Depends(get_current_user_id), db=Depends(get_db)):
     users = db.execute("SELECT id, username FROM users ORDER BY username").fetchall()
     return [UserBrief(id=u["id"], username=u["username"]) for u in users]
+
+
+# ---------------------------------------------------------------------------
+# Global search
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/search", response_model=list[CardSearchResult])
+def global_search(
+    q: str,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    if not q or len(q.strip()) < 2:
+        raise HTTPException(status_code=400, detail="Query must be at least 2 characters")
+    pattern = f"%{q.strip()}%"
+    rows = db.execute(
+        "SELECT c.id, c.title, c.details, c.board_id, b.title AS board_title,"
+        " col.title AS column_title, c.priority, c.label, c.due_date, c.story_points"
+        " FROM cards c"
+        " JOIN boards b ON c.board_id = b.id"
+        " JOIN columns col ON c.column_id = col.id"
+        " WHERE b.user_id = ? AND c.archived = 0"
+        " AND (c.title LIKE ? OR c.details LIKE ?)"
+        " ORDER BY b.id, col.title, c.position"
+        " LIMIT 50",
+        (user_id, pattern, pattern),
+    ).fetchall()
+    return [
+        CardSearchResult(
+            id=row["id"],
+            title=row["title"],
+            details=row["details"],
+            board_id=row["board_id"],
+            board_title=row["board_title"],
+            column_title=row["column_title"],
+            priority=row["priority"] or "medium",
+            label=row["label"],
+            due_date=row["due_date"],
+            story_points=row["story_points"],
+        )
+        for row in rows
+    ]
 
 
 @app.patch("/api/cards/{card_id}/move")
