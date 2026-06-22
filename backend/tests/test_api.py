@@ -1537,6 +1537,51 @@ class TestBoardTemplates:
         assert len(board["columns"]) > 0
 
 
+class TestStoryPoints:
+    def _board_col_card(self, auth_client):
+        board_id = auth_client.post("/api/boards", json={"title": "SP Board"}).json()["id"]
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        col_id = board["columns"][0]["id"]
+        card_id = auth_client.post(f"/api/boards/{board_id}/cards", json={"column_id": col_id, "title": "Card"}).json()["id"]
+        return board_id, col_id, card_id
+
+    def test_set_story_points(self, auth_client):
+        _, _, card_id = self._board_col_card(auth_client)
+        resp = auth_client.patch(f"/api/cards/{card_id}", json={"story_points": 5})
+        assert resp.status_code == 200
+
+    def test_story_points_returned_in_board(self, auth_client):
+        board_id, _, card_id = self._board_col_card(auth_client)
+        auth_client.patch(f"/api/cards/{card_id}", json={"story_points": 8})
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        assert board["cards"][card_id]["story_points"] == 8
+
+    def test_clear_story_points(self, auth_client):
+        board_id, _, card_id = self._board_col_card(auth_client)
+        auth_client.patch(f"/api/cards/{card_id}", json={"story_points": 5})
+        auth_client.patch(f"/api/cards/{card_id}", json={"story_points": None})
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        assert board["cards"][card_id]["story_points"] is None
+
+    def test_story_points_negative_rejected(self, auth_client):
+        _, _, card_id = self._board_col_card(auth_client)
+        resp = auth_client.patch(f"/api/cards/{card_id}", json={"story_points": -1})
+        assert resp.status_code == 422
+
+    def test_story_points_too_large_rejected(self, auth_client):
+        _, _, card_id = self._board_col_card(auth_client)
+        resp = auth_client.patch(f"/api/cards/{card_id}", json={"story_points": 1000})
+        assert resp.status_code == 422
+
+    def test_total_story_points_in_stats(self, auth_client):
+        board_id, col_id, card_id = self._board_col_card(auth_client)
+        auth_client.patch(f"/api/cards/{card_id}", json={"story_points": 5})
+        card_id2 = auth_client.post(f"/api/boards/{board_id}/cards", json={"column_id": col_id, "title": "Card 2"}).json()["id"]
+        auth_client.patch(f"/api/cards/{card_id2}", json={"story_points": 3})
+        stats = auth_client.get(f"/api/boards/{board_id}/stats").json()
+        assert stats["total_story_points"] == 8
+
+
 class TestMoveCardToBoard:
     def _setup(self, auth_client):
         src = auth_client.post("/api/boards", json={"title": "Source"}).json()["id"]

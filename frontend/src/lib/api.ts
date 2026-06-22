@@ -250,6 +250,7 @@ export type BoardStats = {
   cards_by_column: Record<string, number>;
   cards_by_priority: Record<string, number>;
   overdue_count: number;
+  total_story_points: number;
   completed_column_id: string | null;
 };
 

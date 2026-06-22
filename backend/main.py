@@ -142,7 +142,7 @@ def _build_board_response(db, board_id: int) -> BoardResponse:
     ).fetchall()
     all_cards = db.execute(
         "SELECT c.id, c.column_id, c.title, c.details, c.due_date, c.priority, c.label,"
-        " c.assigned_to, u.username AS assigned_to_username"
+        " c.assigned_to, c.story_points, u.username AS assigned_to_username"
         " FROM cards c LEFT JOIN users u ON c.assigned_to = u.id"
         " WHERE c.board_id = ? AND c.archived = 0 ORDER BY c.position",
         (board_id,),
@@ -173,6 +173,7 @@ def _build_board_response(db, board_id: int) -> BoardResponse:
             assigned_to_username=card["assigned_to_username"],
             checklist_count=cl_total,
             checklist_done=cl_done,
+            story_points=card["story_points"],
         )
     return BoardResponse(
         columns=[
@@ -726,7 +727,7 @@ def update_card(
         raise HTTPException(status_code=404, detail="Card not found")
     with db:
         db.execute(
-            "UPDATE cards SET title = ?, details = ?, due_date = ?, priority = ?, label = ?"
+            "UPDATE cards SET title = ?, details = ?, due_date = ?, priority = ?, label = ?, story_points = ?"
             " WHERE id = ?",
             (
                 req.title if req.title is not None else card["title"],
@@ -734,6 +735,7 @@ def update_card(
                 req.due_date if req.due_date is not None else card["due_date"],
                 req.priority if req.priority is not None else card["priority"],
                 req.label if req.label is not None else card["label"],
+                req.story_points,
                 card_id,
             ),
         )
@@ -1227,7 +1229,7 @@ def get_board_stats(
     ).fetchall()
 
     all_cards = db.execute(
-        "SELECT column_id, priority, due_date FROM cards WHERE board_id = ?",
+        "SELECT column_id, priority, due_date, story_points FROM cards WHERE board_id = ? AND archived = 0",
         (board_id,),
     ).fetchall()
 
@@ -1237,6 +1239,7 @@ def get_board_stats(
     cards_by_column: dict[str, int] = {col["id"]: 0 for col in cols}
     cards_by_priority: dict[str, int] = {"low": 0, "medium": 0, "high": 0}
     overdue_count = 0
+    total_story_points = 0
 
     for card in all_cards:
         cards_by_column[card["column_id"]] = cards_by_column.get(card["column_id"], 0) + 1
@@ -1244,6 +1247,8 @@ def get_board_stats(
         cards_by_priority[pri] = cards_by_priority.get(pri, 0) + 1
         if card["due_date"] and card["due_date"] < today:
             overdue_count += 1
+        if card["story_points"]:
+            total_story_points += card["story_points"]
 
     # Identify "done" column (last column by position, or one titled "Done")
     done_col_id = None
@@ -1259,6 +1264,7 @@ def get_board_stats(
         cards_by_column={col["title"]: cards_by_column.get(col["id"], 0) for col in cols},
         cards_by_priority=cards_by_priority,
         overdue_count=overdue_count,
+        total_story_points=total_story_points,
         completed_column_id=done_col_id,
     )
 

@@ -8,6 +8,7 @@ export type Card = {
   assigned_to_username?: string | null;
   checklist_count?: number;
   checklist_done?: number;
+  story_points?: number | null;
 };
 
 export type ChecklistItem = {

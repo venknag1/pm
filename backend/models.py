@@ -32,6 +32,7 @@ class CardData(BaseModel):
     assigned_to_username: str | None = None
     checklist_count: int = 0
     checklist_done: int = 0
+    story_points: int | None = None
 
 
 class ColumnData(BaseModel):
@@ -76,6 +77,7 @@ class UpdateCardRequest(BaseModel):
     due_date: str | None = None
     priority: Literal["low", "medium", "high"] | None = None
     label: str | None = None
+    story_points: int | None = Field(default=None, ge=0, le=999)
 
 
 class AssignCardRequest(BaseModel):
@@ -107,6 +109,7 @@ class BoardStats(BaseModel):
     cards_by_column: dict[str, int]
     cards_by_priority: dict[str, int]
     overdue_count: int
+    total_story_points: int = 0
     completed_column_id: str | None = None
 
 

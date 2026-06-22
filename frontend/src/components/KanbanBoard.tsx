@@ -483,6 +483,12 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
               </div>
             </div>
             <div className="flex flex-col gap-1">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">Story Points</p>
+              <p className="font-display text-2xl font-semibold text-[var(--secondary-purple)]">
+                {stats.total_story_points ?? 0}
+              </p>
+            </div>
+            <div className="flex flex-col gap-1">
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">By Column</p>
               <div className="flex flex-col gap-0.5 text-xs text-[var(--gray-text)]">
                 {Object.entries(stats.cards_by_column).map(([col, count]) => (

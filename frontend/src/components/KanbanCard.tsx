@@ -48,8 +48,11 @@ export const KanbanCard = ({ card, users, boardId, onDelete, onUpdate, onDuplica
     transition,
   };
 
-  const isOverdue =
-    card.due_date && new Date(card.due_date) < new Date(new Date().toDateString());
+  const today = new Date(new Date().toDateString());
+  const dueDate = card.due_date ? new Date(card.due_date + "T00:00:00") : null;
+  const isOverdue = dueDate && dueDate < today;
+  const isDueToday = dueDate && dueDate.getTime() === today.getTime();
+  const isDueSoon = dueDate && !isOverdue && !isDueToday && dueDate <= new Date(today.getTime() + 3 * 86400000);
 
   const hasChecklist = (card.checklist_count ?? 0) > 0;
 
@@ -104,10 +107,19 @@ export const KanbanCard = ({ card, users, boardId, onDelete, onUpdate, onDuplica
 
         <div className="mt-2 flex items-center gap-2">
           {card.due_date && (
-            <p className={clsx("text-[10px] font-semibold", isOverdue ? "text-red-500" : "text-[var(--gray-text)]")}>
-              Due {new Date(card.due_date + "T00:00:00").toLocaleDateString()}
-              {isOverdue && " (overdue)"}
+            <p className={clsx("text-[10px] font-semibold",
+              isOverdue ? "text-red-500" :
+              isDueToday ? "text-amber-500" :
+              isDueSoon ? "text-[var(--primary-blue)]" :
+              "text-[var(--gray-text)]"
+            )}>
+              {isOverdue ? "Overdue" : isDueToday ? "Due today" : `Due ${new Date(card.due_date + "T00:00:00").toLocaleDateString()}`}
             </p>
+          )}
+          {card.story_points != null && (
+            <span className="flex h-4 w-4 items-center justify-center rounded bg-[var(--secondary-purple)]/10 text-[9px] font-bold text-[var(--secondary-purple)]">
+              {card.story_points}
+            </span>
           )}
           {hasChecklist && (
             <span className={clsx(

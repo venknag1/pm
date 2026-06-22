@@ -8,7 +8,7 @@ import { initialData } from "@/lib/kanban";
 vi.mock("@/lib/api", () => ({
   getBoardById: vi.fn(),
   listUsers: vi.fn().mockResolvedValue([]),
-  getBoardStats: vi.fn().mockResolvedValue({ total_cards: 0, cards_by_column: {}, cards_by_priority: {}, overdue_count: 0, completed_column_id: null }),
+  getBoardStats: vi.fn().mockResolvedValue({ total_cards: 0, cards_by_column: {}, cards_by_priority: {}, overdue_count: 0, total_story_points: 0, completed_column_id: null }),
   getBoardActivity: vi.fn().mockResolvedValue([]),
   listArchivedCards: vi.fn().mockResolvedValue([]),
   unarchiveCard: vi.fn().mockResolvedValue(undefined),

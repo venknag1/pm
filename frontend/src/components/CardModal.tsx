@@ -45,6 +45,7 @@ export const CardModal = ({ card, users, currentBoardId, onClose, onUpdate, onDu
   const [dueDate, setDueDate] = useState(card.due_date ?? "");
   const [priority, setPriority] = useState<"low" | "medium" | "high">(card.priority ?? "medium");
   const [label, setLabel] = useState(card.label ?? "");
+  const [storyPoints, setStoryPoints] = useState<string>(card.story_points != null ? String(card.story_points) : "");
   const [assignedUserId, setAssignedUserId] = useState<number | null>(() => {
     if (!card.assigned_to_username) return null;
     return users.find((u) => u.username === card.assigned_to_username)?.id ?? null;
@@ -95,12 +96,14 @@ export const CardModal = ({ card, users, currentBoardId, onClose, onUpdate, onDu
   const handleSave = async () => {
     if (!title.trim()) return;
     setSaving(true);
+    const sp = storyPoints !== "" ? parseInt(storyPoints, 10) : null;
     const updates = {
       title: title.trim(),
       details: details.trim(),
       due_date: dueDate || null,
       priority,
       label: label || null,
+      story_points: sp != null && !isNaN(sp) ? sp : null,
     };
     try {
       await updateCard(card.id, updates as Parameters<typeof updateCard>[1]);
@@ -115,6 +118,7 @@ export const CardModal = ({ card, users, currentBoardId, onClose, onUpdate, onDu
         due_date: dueDate || undefined,
         label: label || undefined,
         assigned_to_username: assignedUsername,
+        story_points: updates.story_points ?? undefined,
       });
       setDirty(false);
     } catch (err) {
@@ -275,7 +279,7 @@ export const CardModal = ({ card, users, currentBoardId, onClose, onUpdate, onDu
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">
                 Priority
@@ -307,6 +311,21 @@ export const CardModal = ({ card, users, currentBoardId, onClose, onUpdate, onDu
                 type="date"
                 value={dueDate}
                 onChange={(e) => { setDueDate(e.target.value); mark(); }}
+                className="w-full rounded-xl border border-[var(--stroke)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--navy-dark)] outline-none transition focus:border-[var(--primary-blue)]"
+              />
+            </div>
+            <div>
+              <label htmlFor="story-points" className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">
+                Points
+              </label>
+              <input
+                id="story-points"
+                type="number"
+                min="0"
+                max="999"
+                placeholder="—"
+                value={storyPoints}
+                onChange={(e) => { setStoryPoints(e.target.value); mark(); }}
                 className="w-full rounded-xl border border-[var(--stroke)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--navy-dark)] outline-none transition focus:border-[var(--primary-blue)]"
               />
             </div>
