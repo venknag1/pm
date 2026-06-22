@@ -17,7 +17,9 @@
       "Bash(python -m pytest tests/test_api.py::TestMoveCardToBoard tests/test_api.py::TestBoardExport -v)",
       "Bash(python -m pytest tests/test_api.py::TestStoryPoints -v)",
       "Bash(python -m pytest tests/test_api.py -q --tb=no)",
-      "Bash(python -m pytest tests/test_api.py::TestGlobalSearch tests/test_api.py::TestBoardCompletion -v)"
+      "Bash(python -m pytest tests/test_api.py::TestGlobalSearch tests/test_api.py::TestBoardCompletion -v)",
+      "Bash(python -m pytest tests/ -q --tb=no)",
+      "Bash(python -m pytest tests/test_api.py -q --tb=short)"
     ]
   }
 }

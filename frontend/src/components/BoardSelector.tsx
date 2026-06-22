@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { listBoards, createBoard, deleteBoard, renameBoard, type BoardSummary } from "@/lib/api";
+import { listBoards, createBoard, deleteBoard, renameBoard, pinBoard, unpinBoard, type BoardSummary } from "@/lib/api";
 import { ChangePasswordForm } from "@/components/ChangePasswordForm";
 import { SearchModal } from "@/components/SearchModal";
 
@@ -38,12 +38,23 @@ export const BoardSelector = ({
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "/" && !["INPUT", "TEXTAREA"].includes((e.target as HTMLElement).tagName)) {
+        e.preventDefault();
+        setShowSearch(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newBoardTitle.trim()) return;
     try {
       const created = await createBoard(newBoardTitle.trim(), selectedTemplate || undefined);
-      setBoards((prev) => [...prev, { ...created, created_at: new Date().toISOString(), card_count: 0, done_count: 0 }]);
+      setBoards((prev) => [...prev, { ...created, created_at: new Date().toISOString(), card_count: 0, done_count: 0, pinned: false }]);
       setNewBoardTitle("");
       setSelectedTemplate("");
       setCreatingBoard(false);
@@ -67,6 +78,21 @@ export const BoardSelector = ({
     e.stopPropagation();
     setRenamingId(board.id);
     setRenameTitle(board.title);
+  };
+
+  const handlePin = async (e: React.MouseEvent, board: BoardSummary) => {
+    e.stopPropagation();
+    try {
+      if (board.pinned) {
+        await unpinBoard(board.id);
+      } else {
+        await pinBoard(board.id);
+      }
+      const updated = await listBoards();
+      setBoards(updated);
+    } catch {
+      setError("Failed to update pin");
+    }
   };
 
   const handleRename = async (e: React.FormEvent, boardId: number) => {
@@ -273,8 +299,24 @@ export const BoardSelector = ({
                 </form>
               ) : (
                 <div className="flex items-start justify-between">
-                  <h3 className="font-semibold text-[var(--navy-dark)]">{board.title}</h3>
+                  <h3 className="flex items-center gap-1.5 font-semibold text-[var(--navy-dark)]">
+                    {board.pinned && (
+                      <svg width="12" height="12" viewBox="0 0 14 14" fill="currentColor" className="text-[var(--accent-yellow)]" aria-label="Pinned">
+                        <path d="M7 1l1.545 4.054L13 5.236l-3.5 3.09.999 4.674L7 10.618l-3.499 2.382L4.5 8.326 1 5.236l4.455-.182L7 1z"/>
+                      </svg>
+                    )}
+                    {board.title}
+                  </h3>
                   <div className="flex gap-1 opacity-0 transition group-hover:opacity-100">
+                    <button
+                      onClick={(e) => handlePin(e, board)}
+                      className={`rounded-lg p-1.5 transition hover:bg-[var(--surface)] ${board.pinned ? "text-[var(--accent-yellow)]" : "text-[var(--gray-text)] hover:text-[var(--accent-yellow)]"}`}
+                      title={board.pinned ? "Unpin board" : "Pin board"}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill={board.pinned ? "currentColor" : "none"} stroke={board.pinned ? "none" : "currentColor"} strokeWidth="1.3">
+                        <path d="M7 1l1.545 4.054L13 5.236l-3.5 3.09.999 4.674L7 10.618l-3.499 2.382L4.5 8.326 1 5.236l4.455-.182L7 1z" strokeLinejoin="round"/>
+                      </svg>
+                    </button>
                     <button
                       onClick={(e) => startRename(e, board)}
                       className="rounded-lg p-1.5 text-[var(--gray-text)] transition hover:bg-[var(--surface)] hover:text-[var(--navy-dark)]"

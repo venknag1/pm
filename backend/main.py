@@ -450,7 +450,7 @@ def register(req: RegisterRequest, db=Depends(get_db)):
 @app.get("/api/boards", response_model=list[BoardSummary])
 def list_boards(user_id: int = Depends(get_current_user_id), db=Depends(get_db)):
     boards = db.execute(
-        "SELECT id, title, created_at FROM boards WHERE user_id = ? ORDER BY id",
+        "SELECT id, title, pinned, created_at FROM boards WHERE user_id = ? ORDER BY pinned DESC, id",
         (user_id,),
     ).fetchall()
     result = []
@@ -481,6 +481,7 @@ def list_boards(user_id: int = Depends(get_current_user_id), db=Depends(get_db))
             created_at=board["created_at"],
             card_count=card_count,
             done_count=done_count,
+            pinned=bool(board["pinned"]),
         ))
     return result
 
@@ -532,6 +533,30 @@ def rename_board(
     _get_board_by_id(db, board_id, user_id)
     with db:
         db.execute("UPDATE boards SET title = ? WHERE id = ?", (req.title, board_id))
+    return {"ok": True}
+
+
+@app.post("/api/boards/{board_id}/pin")
+def pin_board(
+    board_id: int,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    _get_board_by_id(db, board_id, user_id)
+    with db:
+        db.execute("UPDATE boards SET pinned = 1 WHERE id = ?", (board_id,))
+    return {"ok": True}
+
+
+@app.post("/api/boards/{board_id}/unpin")
+def unpin_board(
+    board_id: int,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    _get_board_by_id(db, board_id, user_id)
+    with db:
+        db.execute("UPDATE boards SET pinned = 0 WHERE id = ?", (board_id,))
     return {"ok": True}
 
 

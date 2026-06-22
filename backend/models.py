@@ -53,6 +53,7 @@ class BoardSummary(BaseModel):
     created_at: str
     card_count: int = 0
     done_count: int = 0
+    pinned: bool = False
 
 
 class CardSearchResult(BaseModel):

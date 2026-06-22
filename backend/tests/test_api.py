@@ -1772,3 +1772,45 @@ class TestBoardCompletion:
         boards = auth_client.get("/api/boards").json()
         target = next(b for b in boards if b["id"] == board_id)
         assert target["card_count"] == 0
+
+
+class TestBoardPinning:
+    def test_pin_board(self, auth_client):
+        board_id = auth_client.post("/api/boards", json={"title": "Pin Me"}).json()["id"]
+        resp = auth_client.post(f"/api/boards/{board_id}/pin")
+        assert resp.status_code == 200
+        boards = auth_client.get("/api/boards").json()
+        target = next(b for b in boards if b["id"] == board_id)
+        assert target["pinned"] is True
+
+    def test_unpin_board(self, auth_client):
+        board_id = auth_client.post("/api/boards", json={"title": "Unpin Me"}).json()["id"]
+        auth_client.post(f"/api/boards/{board_id}/pin")
+        resp = auth_client.post(f"/api/boards/{board_id}/unpin")
+        assert resp.status_code == 200
+        boards = auth_client.get("/api/boards").json()
+        target = next(b for b in boards if b["id"] == board_id)
+        assert target["pinned"] is False
+
+    def test_pinned_boards_sorted_first(self, auth_client):
+        b1 = auth_client.post("/api/boards", json={"title": "First"}).json()["id"]
+        b2 = auth_client.post("/api/boards", json={"title": "Pinned"}).json()["id"]
+        auth_client.post(f"/api/boards/{b2}/pin")
+        boards = auth_client.get("/api/boards").json()
+        ids = [b["id"] for b in boards]
+        assert ids.index(b2) < ids.index(b1)
+
+    def test_pin_other_users_board_fails(self, client, admin_client):
+        admin_client.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
+        board_id = admin_client.post("/api/boards", json={"title": "Admin Board"}).json()["id"]
+        client.post("/api/auth/login", json={"username": "user", "password": "password"})
+        resp = client.post(f"/api/boards/{board_id}/pin")
+        assert resp.status_code == 404
+
+    def test_pin_nonexistent_board_fails(self, auth_client):
+        resp = auth_client.post("/api/boards/999999/pin")
+        assert resp.status_code == 404
+
+    def test_pin_unauthenticated_fails(self, client):
+        resp = client.post("/api/boards/1/pin")
+        assert resp.status_code == 401

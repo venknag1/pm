@@ -313,6 +313,37 @@ export const CardModal = ({ card, users, currentBoardId, onClose, onUpdate, onDu
                 onChange={(e) => { setDueDate(e.target.value); mark(); }}
                 className="w-full rounded-xl border border-[var(--stroke)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--navy-dark)] outline-none transition focus:border-[var(--primary-blue)]"
               />
+              <div className="mt-1.5 flex gap-1">
+                {[
+                  { label: "Today", days: 0 },
+                  { label: "Tomorrow", days: 1 },
+                  { label: "+7d", days: 7 },
+                ].map(({ label: l, days }) => (
+                  <button
+                    key={l}
+                    type="button"
+                    onClick={() => {
+                      const d = new Date();
+                      d.setDate(d.getDate() + days);
+                      const iso = d.toISOString().slice(0, 10);
+                      setDueDate(iso);
+                      mark();
+                    }}
+                    className="rounded-md border border-[var(--stroke)] bg-[var(--surface)] px-2 py-0.5 text-[10px] font-semibold text-[var(--gray-text)] transition hover:border-[var(--primary-blue)] hover:text-[var(--primary-blue)]"
+                  >
+                    {l}
+                  </button>
+                ))}
+                {dueDate && (
+                  <button
+                    type="button"
+                    onClick={() => { setDueDate(""); mark(); }}
+                    className="rounded-md border border-[var(--stroke)] bg-[var(--surface)] px-2 py-0.5 text-[10px] font-semibold text-[var(--gray-text)] transition hover:border-red-300 hover:text-red-500"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
             </div>
             <div>
               <label htmlFor="story-points" className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">

@@ -80,6 +80,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if not _has_column(conn, "cards", "story_points"):
         conn.execute("ALTER TABLE cards ADD COLUMN story_points INTEGER")
 
+    # Add pinned to boards
+    if not _has_column(conn, "boards", "pinned"):
+        conn.execute("ALTER TABLE boards ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+
     conn.commit()
 
 
@@ -100,6 +104,7 @@ def init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
                 title TEXT NOT NULL DEFAULT 'My Board',
+                pinned INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );

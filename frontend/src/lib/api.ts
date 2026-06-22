@@ -11,6 +11,7 @@ export type BoardSummary = {
   created_at: string;
   card_count: number;
   done_count: number;
+  pinned: boolean;
 };
 
 export type UserSummary = {
@@ -434,4 +435,14 @@ export async function searchCards(q: string): Promise<CardSearchResult[]> {
   const resp = await request(`/api/search?q=${encodeURIComponent(q)}`);
   if (!resp.ok) throw new Error("Search failed");
   return resp.json();
+}
+
+// --- Board pin ---
+
+export async function pinBoard(boardId: number): Promise<void> {
+  await request(`/api/boards/${boardId}/pin`, { method: "POST" });
+}
+
+export async function unpinBoard(boardId: number): Promise<void> {
+  await request(`/api/boards/${boardId}/unpin`, { method: "POST" });
 }
