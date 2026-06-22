@@ -1912,3 +1912,126 @@ class TestMyWorkCards:
         assert "board_title" in target
         assert "column_title" in target
         assert target["board_title"] == "Work Board"
+
+
+class TestBoardDescription:
+    def test_update_description(self, auth_client):
+        board_id = auth_client.post("/api/boards", json={"title": "Desc Board"}).json()["id"]
+        resp = auth_client.patch(f"/api/boards/{board_id}", json={"description": "A test description"})
+        assert resp.status_code == 200
+        boards = auth_client.get("/api/boards").json()
+        target = next(b for b in boards if b["id"] == board_id)
+        assert target["description"] == "A test description"
+
+    def test_description_in_boards_list(self, auth_client):
+        board_id = auth_client.post("/api/boards", json={"title": "Desc Board 2"}).json()["id"]
+        auth_client.patch(f"/api/boards/{board_id}", json={"description": "Hello"})
+        boards = auth_client.get("/api/boards").json()
+        target = next(b for b in boards if b["id"] == board_id)
+        assert "description" in target
+
+    def test_clear_description(self, auth_client):
+        board_id = auth_client.post("/api/boards", json={"title": "Desc Board 3"}).json()["id"]
+        auth_client.patch(f"/api/boards/{board_id}", json={"description": "Temp desc"})
+        auth_client.patch(f"/api/boards/{board_id}", json={"description": None})
+        boards = auth_client.get("/api/boards").json()
+        target = next(b for b in boards if b["id"] == board_id)
+        assert target["description"] is None
+
+    def test_rename_preserves_description(self, auth_client):
+        board_id = auth_client.post("/api/boards", json={"title": "Desc Board 4"}).json()["id"]
+        auth_client.patch(f"/api/boards/{board_id}", json={"description": "Keep me"})
+        auth_client.patch(f"/api/boards/{board_id}", json={"title": "New Title"})
+        boards = auth_client.get("/api/boards").json()
+        target = next(b for b in boards if b["id"] == board_id)
+        assert target["description"] == "Keep me"
+        assert target["title"] == "New Title"
+
+
+class TestCSVExport:
+    def _setup(self, auth_client):
+        board_id = auth_client.post("/api/boards", json={"title": "CSV Board"}).json()["id"]
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        col_id = board["columns"][0]["id"]
+        auth_client.post(f"/api/boards/{board_id}/cards", json={"column_id": col_id, "title": "Card 1", "priority": "high"})
+        return board_id
+
+    def test_csv_export_returns_200(self, auth_client):
+        board_id = self._setup(auth_client)
+        resp = auth_client.get(f"/api/boards/{board_id}/export/csv")
+        assert resp.status_code == 200
+
+    def test_csv_content_type(self, auth_client):
+        board_id = self._setup(auth_client)
+        resp = auth_client.get(f"/api/boards/{board_id}/export/csv")
+        assert "text/csv" in resp.headers.get("content-type", "")
+
+    def test_csv_has_header_row(self, auth_client):
+        board_id = self._setup(auth_client)
+        resp = auth_client.get(f"/api/boards/{board_id}/export/csv")
+        content = resp.text
+        assert "Title" in content
+        assert "Priority" in content
+
+    def test_csv_includes_card_data(self, auth_client):
+        board_id = self._setup(auth_client)
+        resp = auth_client.get(f"/api/boards/{board_id}/export/csv")
+        assert "Card 1" in resp.text
+
+    def test_csv_other_users_board_fails(self, client, admin_client):
+        admin_client.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
+        board_id = admin_client.post("/api/boards", json={"title": "Admin CSV"}).json()["id"]
+        client.post("/api/auth/login", json={"username": "user", "password": "password"})
+        resp = client.get(f"/api/boards/{board_id}/export/csv")
+        assert resp.status_code == 404
+
+    def test_csv_unauthenticated_fails(self, client):
+        resp = client.get("/api/boards/1/export/csv")
+        assert resp.status_code == 401
+
+
+class TestBoardNotifications:
+    def _setup(self, auth_client):
+        board_id = auth_client.post("/api/boards", json={"title": "Notif Board"}).json()["id"]
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        col_id = board["columns"][0]["id"]
+        # Overdue card
+        card_id = auth_client.post(f"/api/boards/{board_id}/cards", json={"column_id": col_id, "title": "Overdue"}).json()["id"]
+        auth_client.patch(f"/api/cards/{card_id}", json={"due_date": "2020-01-01"})
+        return board_id, card_id
+
+    def test_overdue_cards_returned(self, auth_client):
+        board_id, card_id = self._setup(auth_client)
+        resp = auth_client.get(f"/api/boards/{board_id}/notifications")
+        assert resp.status_code == 200
+        ids = [n["id"] for n in resp.json()]
+        assert card_id in ids
+
+    def test_is_overdue_flag(self, auth_client):
+        board_id, card_id = self._setup(auth_client)
+        resp = auth_client.get(f"/api/boards/{board_id}/notifications")
+        target = next(n for n in resp.json() if n["id"] == card_id)
+        assert target["is_overdue"] is True
+
+    def test_future_cards_not_included(self, auth_client):
+        board_id = auth_client.post("/api/boards", json={"title": "Future Board"}).json()["id"]
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        col_id = board["columns"][0]["id"]
+        card_id = auth_client.post(f"/api/boards/{board_id}/cards", json={"column_id": col_id, "title": "Future"}).json()["id"]
+        auth_client.patch(f"/api/cards/{card_id}", json={"due_date": "2099-01-01"})
+        resp = auth_client.get(f"/api/boards/{board_id}/notifications")
+        ids = [n["id"] for n in resp.json()]
+        assert card_id not in ids
+
+    def test_no_due_date_not_included(self, auth_client):
+        board_id = auth_client.post("/api/boards", json={"title": "NDD Board"}).json()["id"]
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        col_id = board["columns"][0]["id"]
+        card_id = auth_client.post(f"/api/boards/{board_id}/cards", json={"column_id": col_id, "title": "No Date"}).json()["id"]
+        resp = auth_client.get(f"/api/boards/{board_id}/notifications")
+        ids = [n["id"] for n in resp.json()]
+        assert card_id not in ids
+
+    def test_unauthenticated_fails(self, client):
+        resp = client.get("/api/boards/1/notifications")
+        assert resp.status_code == 401

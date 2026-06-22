@@ -28,7 +28,9 @@ vi.mock("@/lib/api", () => ({
   moveCardToBoard: vi.fn().mockResolvedValue(undefined),
   listBoards: vi.fn().mockResolvedValue([]),
   exportBoard: vi.fn().mockResolvedValue({ board: "Test", exported_at: new Date().toISOString(), columns: [] }),
+  exportBoardCsv: vi.fn().mockResolvedValue(undefined),
   searchCards: vi.fn().mockResolvedValue([]),
+  getBoardNotifications: vi.fn().mockResolvedValue([]),
 }));
 
 const BOARD_ID = 1;

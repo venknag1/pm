@@ -23,7 +23,10 @@ import {
   listArchivedCards,
   unarchiveCard,
   exportBoard,
+  exportBoardCsv,
+  getBoardNotifications,
   listUsers,
+  type BoardNotification,
   renameColumn,
   createColumn,
   deleteColumn,
@@ -68,6 +71,8 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [showArchived, setShowArchived] = useState(false);
   const [archivedCards, setArchivedCards] = useState<ArchivedCard[]>([]);
+  const [notifications, setNotifications] = useState<BoardNotification[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
@@ -76,6 +81,7 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
   useEffect(() => {
     getBoardById(boardId).then(setBoard).catch(console.error);
     listUsers().then(setUsers).catch(console.error);
+    getBoardNotifications(boardId).then(setNotifications).catch(console.error);
   }, [boardId]);
 
   useEffect(() => {
@@ -418,6 +424,51 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
               </svg>
               Archive
             </button>
+            <div className="relative">
+              <button
+                onClick={() => setShowNotifications((n) => !n)}
+                className={`relative flex items-center gap-2 rounded-xl border px-4 py-2 text-xs font-semibold uppercase tracking-[0.15em] transition ${
+                  showNotifications
+                    ? "border-[var(--accent-yellow)] bg-[var(--accent-yellow)] text-[var(--navy-dark)]"
+                    : "border-[var(--stroke)] bg-[var(--surface)] text-[var(--gray-text)] hover:border-[var(--accent-yellow)] hover:text-[var(--accent-yellow)]"
+                }`}
+                title="Due-date alerts"
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                  <path d="M7 1a5 5 0 100 10A5 5 0 007 1zM7 4v3l2 1" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                </svg>
+                {notifications.length > 0 && (
+                  <span className={`absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold ${notifications.some((n) => n.is_overdue) ? "bg-red-500 text-white" : "bg-amber-400 text-[var(--navy-dark)]"}`}>
+                    {notifications.length}
+                  </span>
+                )}
+              </button>
+              {showNotifications && notifications.length > 0 && (
+                <div className="absolute right-0 top-10 z-30 w-72 rounded-2xl border border-[var(--stroke)] bg-white shadow-xl">
+                  <div className="border-b border-[var(--stroke)] px-4 py-2.5">
+                    <p className="text-xs font-semibold uppercase tracking-[0.15em] text-[var(--navy-dark)]">Upcoming Deadlines</p>
+                  </div>
+                  <div className="max-h-64 overflow-y-auto">
+                    {notifications.map((n) => (
+                      <div key={n.id} className="border-b border-[var(--stroke)] px-4 py-2.5 last:border-0">
+                        <p className="text-xs font-semibold text-[var(--navy-dark)]">{n.title}</p>
+                        <div className="mt-0.5 flex items-center gap-2 text-[10px]">
+                          <span className="text-[var(--gray-text)]">{n.column_title}</span>
+                          <span className={n.is_overdue ? "font-semibold text-red-500" : "text-amber-500"}>
+                            {n.is_overdue ? "Overdue" : "Due"} {new Date(n.due_date + "T00:00:00").toLocaleDateString()}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {showNotifications && notifications.length === 0 && (
+                <div className="absolute right-0 top-10 z-30 w-64 rounded-2xl border border-[var(--stroke)] bg-white px-4 py-4 shadow-xl text-center">
+                  <p className="text-xs text-[var(--gray-text)]">No upcoming deadlines</p>
+                </div>
+              )}
+            </div>
             <button
               onClick={async () => {
                 try {
@@ -439,7 +490,23 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
                 <path d="M7 1v8M4 6l3 3 3-3M1 10v1.5A1.5 1.5 0 002.5 13h9a1.5 1.5 0 001.5-1.5V10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
-              Export
+              JSON
+            </button>
+            <button
+              onClick={async () => {
+                try {
+                  await exportBoardCsv(boardId, boardTitle);
+                } catch (err) {
+                  console.error(err);
+                }
+              }}
+              className="flex items-center gap-2 rounded-xl border border-[var(--stroke)] bg-[var(--surface)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.15em] text-[var(--gray-text)] transition hover:border-[var(--primary-blue)] hover:text-[var(--primary-blue)]"
+              title="Export board as CSV"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                <path d="M7 1v8M4 6l3 3 3-3M1 10v1.5A1.5 1.5 0 002.5 13h9a1.5 1.5 0 001.5-1.5V10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              CSV
             </button>
             <button
               onClick={() => setShowFilter((f) => !f)}

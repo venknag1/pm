@@ -43,6 +43,7 @@ from .models import (
     MyWorkCard,
     RegisterRequest,
     RenameBoardRequest,
+    UpdateBoardRequest,
     RenameColumnRequest,
     ReorderColumnsRequest,
     SetWipLimitRequest,
@@ -452,7 +453,7 @@ def register(req: RegisterRequest, db=Depends(get_db)):
 @app.get("/api/boards", response_model=list[BoardSummary])
 def list_boards(user_id: int = Depends(get_current_user_id), db=Depends(get_db)):
     boards = db.execute(
-        "SELECT id, title, pinned, created_at FROM boards WHERE user_id = ? ORDER BY pinned DESC, id",
+        "SELECT id, title, description, pinned, created_at FROM boards WHERE user_id = ? ORDER BY pinned DESC, id",
         (user_id,),
     ).fetchall()
     result = []
@@ -480,6 +481,7 @@ def list_boards(user_id: int = Depends(get_current_user_id), db=Depends(get_db))
         result.append(BoardSummary(
             id=board["id"],
             title=board["title"],
+            description=board["description"],
             created_at=board["created_at"],
             card_count=card_count,
             done_count=done_count,
@@ -528,13 +530,20 @@ def get_board_by_id(
 @app.patch("/api/boards/{board_id}")
 def rename_board(
     board_id: int,
-    req: RenameBoardRequest,
+    req: UpdateBoardRequest,
     user_id: int = Depends(get_current_user_id),
     db=Depends(get_db),
 ):
-    _get_board_by_id(db, board_id, user_id)
+    board = _get_board_by_id(db, board_id, user_id)
     with db:
-        db.execute("UPDATE boards SET title = ? WHERE id = ?", (req.title, board_id))
+        db.execute(
+            "UPDATE boards SET title = ?, description = ? WHERE id = ?",
+            (
+                req.title if req.title is not None else board["title"],
+                req.description if "description" in req.model_fields_set else board["description"],
+                board_id,
+            ),
+        )
     return {"ok": True}
 
 
@@ -990,6 +999,94 @@ def export_board(
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "columns": result_columns,
     }
+
+
+@app.get("/api/boards/{board_id}/export/csv")
+def export_board_csv(
+    board_id: int,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    import csv
+    import io
+    from fastapi.responses import StreamingResponse
+
+    _get_board_by_id(db, board_id, user_id)
+    board_row = db.execute("SELECT title FROM boards WHERE id = ?", (board_id,)).fetchone()
+    columns = db.execute(
+        "SELECT id, title FROM columns WHERE board_id = ? ORDER BY position",
+        (board_id,),
+    ).fetchall()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Column", "Title", "Details", "Priority", "Label", "Due Date", "Assigned To", "Story Points"])
+    for col in columns:
+        cards = db.execute(
+            "SELECT c.title, c.details, c.priority, c.label, c.due_date, c.story_points, u.username AS assigned_to"
+            " FROM cards c LEFT JOIN users u ON c.assigned_to = u.id"
+            " WHERE c.column_id = ? AND c.archived = 0 ORDER BY c.position",
+            (col["id"],),
+        ).fetchall()
+        for card in cards:
+            writer.writerow([
+                col["title"],
+                card["title"],
+                card["details"] or "",
+                card["priority"] or "medium",
+                card["label"] or "",
+                card["due_date"] or "",
+                card["assigned_to"] or "",
+                card["story_points"] if card["story_points"] is not None else "",
+            ])
+
+    output.seek(0)
+    safe_title = "".join(c if c.isalnum() or c in " -_" else "_" for c in board_row["title"])
+    filename = f"{safe_title}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Due-soon / notification summary
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/boards/{board_id}/notifications")
+def get_board_notifications(
+    board_id: int,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    """Return overdue and due-soon (within 3 days) non-archived cards for this board."""
+    _get_board_by_id(db, board_id, user_id)
+    from datetime import timedelta
+    today = datetime.now(timezone.utc).date().isoformat()
+    soon_date = (datetime.now(timezone.utc).date() + timedelta(days=3)).isoformat()
+
+    rows = db.execute(
+        "SELECT c.id, c.title, c.due_date, col.title AS column_title, c.priority"
+        " FROM cards c JOIN columns col ON c.column_id = col.id"
+        " WHERE c.board_id = ? AND c.archived = 0 AND c.due_date IS NOT NULL"
+        " AND c.due_date <= ?"
+        " ORDER BY c.due_date",
+        (board_id, soon_date),
+    ).fetchall()
+
+    result = []
+    for row in rows:
+        result.append({
+            "id": row["id"],
+            "title": row["title"],
+            "due_date": row["due_date"],
+            "column_title": row["column_title"],
+            "priority": row["priority"] or "medium",
+            "is_overdue": row["due_date"] < today,
+        })
+    return result
 
 
 # ---------------------------------------------------------------------------

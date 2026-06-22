@@ -88,6 +88,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if not _has_column(conn, "cards", "color"):
         conn.execute("ALTER TABLE cards ADD COLUMN color TEXT")
 
+    # Add description to boards
+    if not _has_column(conn, "boards", "description"):
+        conn.execute("ALTER TABLE boards ADD COLUMN description TEXT")
+
     conn.commit()
 
 
@@ -108,6 +112,7 @@ def init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
                 title TEXT NOT NULL DEFAULT 'My Board',
+                description TEXT,
                 pinned INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE

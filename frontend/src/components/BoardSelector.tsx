@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { listBoards, createBoard, deleteBoard, renameBoard, pinBoard, unpinBoard, type BoardSummary } from "@/lib/api";
+import { listBoards, createBoard, deleteBoard, renameBoard, updateBoardDescription, pinBoard, unpinBoard, type BoardSummary } from "@/lib/api";
 import { ChangePasswordForm } from "@/components/ChangePasswordForm";
 import { SearchModal } from "@/components/SearchModal";
 
@@ -56,7 +56,7 @@ export const BoardSelector = ({
     if (!newBoardTitle.trim()) return;
     try {
       const created = await createBoard(newBoardTitle.trim(), selectedTemplate || undefined);
-      setBoards((prev) => [...prev, { ...created, created_at: new Date().toISOString(), card_count: 0, done_count: 0, pinned: false }]);
+      setBoards((prev) => [...prev, { ...created, description: null, created_at: new Date().toISOString(), card_count: 0, done_count: 0, pinned: false }]);
       setNewBoardTitle("");
       setSelectedTemplate("");
       setCreatingBoard(false);
@@ -351,6 +351,9 @@ export const BoardSelector = ({
                     </button>
                   </div>
                 </div>
+              )}
+              {board.description && (
+                <p className="text-xs text-[var(--gray-text)] line-clamp-2">{board.description}</p>
               )}
               <div className="flex items-center gap-4 text-xs text-[var(--gray-text)]">
                 <span>{board.card_count} {board.card_count === 1 ? "card" : "cards"}</span>

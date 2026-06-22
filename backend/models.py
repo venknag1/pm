@@ -51,6 +51,7 @@ class BoardResponse(BaseModel):
 class BoardSummary(BaseModel):
     id: int
     title: str
+    description: str | None = None
     created_at: str
     card_count: int = 0
     done_count: int = 0
@@ -158,6 +159,11 @@ class CreateBoardRequest(BaseModel):
 
 class RenameBoardRequest(BaseModel):
     title: str = Field(min_length=1, max_length=100)
+
+
+class UpdateBoardRequest(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=100)
+    description: str | None = Field(default=None, max_length=500)
 
 
 class ChatMessage(BaseModel):

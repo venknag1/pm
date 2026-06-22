@@ -8,6 +8,7 @@ export type ChatMessage = {
 export type BoardSummary = {
   id: number;
   title: string;
+  description: string | null;
   created_at: string;
   card_count: number;
   done_count: number;
@@ -88,6 +89,13 @@ export async function renameBoard(boardId: number, title: string): Promise<void>
   await request(`/api/boards/${boardId}`, {
     method: "PATCH",
     body: JSON.stringify({ title }),
+  });
+}
+
+export async function updateBoardDescription(boardId: number, description: string | null): Promise<void> {
+  await request(`/api/boards/${boardId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ description }),
   });
 }
 
@@ -413,6 +421,33 @@ export type BoardExport = { board: string; exported_at: string; columns: BoardEx
 export async function exportBoard(boardId: number): Promise<BoardExport> {
   const resp = await request(`/api/boards/${boardId}/export`);
   if (!resp.ok) throw new Error("Failed to export board");
+  return resp.json();
+}
+
+export async function exportBoardCsv(boardId: number, boardTitle: string): Promise<void> {
+  const resp = await request(`/api/boards/${boardId}/export/csv`);
+  if (!resp.ok) throw new Error("Failed to export CSV");
+  const blob = await resp.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${boardTitle}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export type BoardNotification = {
+  id: string;
+  title: string;
+  due_date: string;
+  column_title: string;
+  priority: string;
+  is_overdue: boolean;
+};
+
+export async function getBoardNotifications(boardId: number): Promise<BoardNotification[]> {
+  const resp = await request(`/api/boards/${boardId}/notifications`);
+  if (!resp.ok) throw new Error("Failed to load notifications");
   return resp.json();
 }
 
