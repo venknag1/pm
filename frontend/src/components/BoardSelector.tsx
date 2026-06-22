@@ -11,6 +11,7 @@ type BoardSelectorProps = {
   username: string;
   isAdmin: boolean;
   onAdminPanel: () => void;
+  onMyWork: () => void;
 };
 
 export const BoardSelector = ({
@@ -19,6 +20,7 @@ export const BoardSelector = ({
   username,
   isAdmin,
   onAdminPanel,
+  onMyWork,
 }: BoardSelectorProps) => {
   const [boards, setBoards] = useState<BoardSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -141,6 +143,18 @@ export const BoardSelector = ({
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={onMyWork}
+              className="flex items-center gap-2 rounded-xl border border-[var(--stroke)] bg-[var(--surface)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.15em] text-[var(--gray-text)] transition hover:border-[var(--primary-blue)] hover:text-[var(--primary-blue)]"
+              title="View cards assigned to me"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                <circle cx="7" cy="5" r="2.5" stroke="currentColor" strokeWidth="1.4"/>
+                <path d="M2 12c0-2.2 2.239-4 5-4s5 1.8 5 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                <path d="M10.5 3l1 1-2.5 2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              My Work
+            </button>
             <button
               onClick={() => setShowSearch(true)}
               className="flex items-center gap-2 rounded-xl border border-[var(--stroke)] bg-[var(--surface)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.15em] text-[var(--gray-text)] transition hover:border-[var(--primary-blue)] hover:text-[var(--primary-blue)]"

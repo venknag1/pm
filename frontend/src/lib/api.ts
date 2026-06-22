@@ -166,7 +166,7 @@ export async function createCard(
 
 export async function updateCard(
   cardId: string,
-  updates: { title?: string; details?: string; due_date?: string; priority?: "low" | "medium" | "high"; label?: string }
+  updates: { title?: string; details?: string; due_date?: string | null; priority?: "low" | "medium" | "high"; label?: string | null; story_points?: number | null; color?: string | null }
 ): Promise<void> {
   await request(`/api/cards/${cardId}`, {
     method: "PATCH",
@@ -445,4 +445,27 @@ export async function pinBoard(boardId: number): Promise<void> {
 
 export async function unpinBoard(boardId: number): Promise<void> {
   await request(`/api/boards/${boardId}/unpin`, { method: "POST" });
+}
+
+// --- My Work ---
+
+export type MyWorkCard = {
+  id: string;
+  title: string;
+  details: string;
+  board_id: number;
+  board_title: string;
+  column_title: string;
+  priority: "low" | "medium" | "high";
+  due_date: string | null;
+  label: string | null;
+  story_points: number | null;
+  color: string | null;
+  is_overdue: boolean;
+};
+
+export async function getMyWorkCards(): Promise<MyWorkCard[]> {
+  const resp = await request("/api/me/cards");
+  if (!resp.ok) throw new Error("Failed to load my work");
+  return resp.json();
 }

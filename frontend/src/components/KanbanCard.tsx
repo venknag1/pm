@@ -6,6 +6,15 @@ import type { Card } from "@/lib/kanban";
 import type { UserBrief } from "@/lib/api";
 import { CardModal } from "@/components/CardModal";
 
+const CARD_COLOR_MAP: Record<string, string> = {
+  red: "#ef4444",
+  orange: "#f97316",
+  yellow: "#eab308",
+  green: "#22c55e",
+  blue: "#3b82f6",
+  purple: "#a855f7",
+};
+
 const PRIORITY_COLORS = {
   high: "bg-red-100 text-red-600",
   medium: "bg-amber-100 text-amber-600",
@@ -62,7 +71,7 @@ export const KanbanCard = ({ card, users, boardId, onDelete, onUpdate, onDuplica
         ref={setNodeRef}
         style={style}
         className={clsx(
-          "group relative rounded-2xl border border-transparent bg-white px-4 py-3 shadow-[0_12px_24px_rgba(3,33,71,0.08)]",
+          "group relative overflow-hidden rounded-2xl border border-transparent bg-white px-4 py-3 shadow-[0_12px_24px_rgba(3,33,71,0.08)]",
           "transition-all duration-150 cursor-pointer",
           isDragging && "opacity-60 shadow-[0_18px_32px_rgba(3,33,71,0.16)]"
         )}
@@ -71,6 +80,12 @@ export const KanbanCard = ({ card, users, boardId, onDelete, onUpdate, onDuplica
         onClick={() => !isDragging && setModalOpen(true)}
         data-testid={`card-${card.id}`}
       >
+        {card.color && CARD_COLOR_MAP[card.color] && (
+          <div
+            className="absolute left-0 top-0 h-full w-1 rounded-l-2xl"
+            style={{ backgroundColor: CARD_COLOR_MAP[card.color] }}
+          />
+        )}
         <button
           type="button"
           onPointerDown={(e) => e.stopPropagation()}

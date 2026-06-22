@@ -33,6 +33,7 @@ class CardData(BaseModel):
     checklist_count: int = 0
     checklist_done: int = 0
     story_points: int | None = None
+    color: str | None = None
 
 
 class ColumnData(BaseModel):
@@ -67,6 +68,22 @@ class CardSearchResult(BaseModel):
     label: str | None = None
     due_date: str | None = None
     story_points: int | None = None
+    color: str | None = None
+
+
+class MyWorkCard(BaseModel):
+    id: str
+    title: str
+    details: str
+    board_id: int
+    board_title: str
+    column_title: str
+    priority: str
+    due_date: str | None = None
+    label: str | None = None
+    story_points: int | None = None
+    color: str | None = None
+    is_overdue: bool = False
 
 
 class RenameColumnRequest(BaseModel):
@@ -93,6 +110,7 @@ class UpdateCardRequest(BaseModel):
     priority: Literal["low", "medium", "high"] | None = None
     label: str | None = None
     story_points: int | None = Field(default=None, ge=0, le=999)
+    color: str | None = None
 
 
 class AssignCardRequest(BaseModel):

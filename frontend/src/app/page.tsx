@@ -5,6 +5,7 @@ import { KanbanBoard } from "@/components/KanbanBoard";
 import { LoginPage } from "@/components/LoginPage";
 import { BoardSelector } from "@/components/BoardSelector";
 import { AdminPanel } from "@/components/AdminPanel";
+import { MyWorkView } from "@/components/MyWorkView";
 import { checkAuth, logout, type AuthUser } from "@/lib/auth";
 import { listBoards } from "@/lib/api";
 
@@ -13,7 +14,8 @@ type View =
   | { kind: "login" }
   | { kind: "boards" }
   | { kind: "board"; boardId: number; boardTitle: string }
-  | { kind: "admin" };
+  | { kind: "admin" }
+  | { kind: "mywork" };
 
 export default function Home() {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -66,6 +68,15 @@ export default function Home() {
     );
   }
 
+  if (view.kind === "mywork") {
+    return (
+      <MyWorkView
+        onSelectBoard={(boardId, boardTitle) => setView({ kind: "board", boardId, boardTitle })}
+        onBack={() => setView({ kind: "boards" })}
+      />
+    );
+  }
+
   if (view.kind === "boards") {
     return (
       <BoardSelector
@@ -76,6 +87,7 @@ export default function Home() {
         }
         onLogout={handleLogout}
         onAdminPanel={() => setView({ kind: "admin" })}
+        onMyWork={() => setView({ kind: "mywork" })}
       />
     );
   }

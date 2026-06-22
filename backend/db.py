@@ -84,6 +84,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if not _has_column(conn, "boards", "pinned"):
         conn.execute("ALTER TABLE boards ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
 
+    # Add color to cards
+    if not _has_column(conn, "cards", "color"):
+        conn.execute("ALTER TABLE cards ADD COLUMN color TEXT")
+
     conn.commit()
 
 
@@ -129,6 +133,7 @@ def init_db() -> None:
                 assigned_to INTEGER,
                 archived INTEGER NOT NULL DEFAULT 0,
                 story_points INTEGER,
+                color TEXT,
                 FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE,
                 FOREIGN KEY (column_id) REFERENCES columns(id) ON DELETE CASCADE
             );

@@ -29,6 +29,15 @@ const PRIORITY_OPTIONS: Array<{ value: "low" | "medium" | "high"; label: string;
 
 const LABEL_OPTIONS = ["bug", "feature", "chore", "design", "docs", ""];
 
+const COLOR_OPTIONS: Array<{ value: string; hex: string; label: string }> = [
+  { value: "red", hex: "#ef4444", label: "Red" },
+  { value: "orange", hex: "#f97316", label: "Orange" },
+  { value: "yellow", hex: "#eab308", label: "Yellow" },
+  { value: "green", hex: "#22c55e", label: "Green" },
+  { value: "blue", hex: "#3b82f6", label: "Blue" },
+  { value: "purple", hex: "#a855f7", label: "Purple" },
+];
+
 type CardModalProps = {
   card: Card;
   users: UserBrief[];
@@ -46,6 +55,7 @@ export const CardModal = ({ card, users, currentBoardId, onClose, onUpdate, onDu
   const [priority, setPriority] = useState<"low" | "medium" | "high">(card.priority ?? "medium");
   const [label, setLabel] = useState(card.label ?? "");
   const [storyPoints, setStoryPoints] = useState<string>(card.story_points != null ? String(card.story_points) : "");
+  const [cardColor, setCardColor] = useState<string>(card.color ?? "");
   const [assignedUserId, setAssignedUserId] = useState<number | null>(() => {
     if (!card.assigned_to_username) return null;
     return users.find((u) => u.username === card.assigned_to_username)?.id ?? null;
@@ -104,9 +114,10 @@ export const CardModal = ({ card, users, currentBoardId, onClose, onUpdate, onDu
       priority,
       label: label || null,
       story_points: sp != null && !isNaN(sp) ? sp : null,
+      color: cardColor || null,
     };
     try {
-      await updateCard(card.id, updates as Parameters<typeof updateCard>[1]);
+      await updateCard(card.id, updates);
       // Assign separately if changed
       const originalId = users.find((u) => u.username === card.assigned_to_username)?.id ?? null;
       if (assignedUserId !== originalId) {
@@ -119,6 +130,7 @@ export const CardModal = ({ card, users, currentBoardId, onClose, onUpdate, onDu
         label: label || undefined,
         assigned_to_username: assignedUsername,
         story_points: updates.story_points ?? undefined,
+        color: cardColor || undefined,
       });
       setDirty(false);
     } catch (err) {
@@ -380,6 +392,32 @@ export const CardModal = ({ card, users, currentBoardId, onClose, onUpdate, onDu
                 >
                   {opt || "None"}
                 </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">
+              Card Color
+            </label>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => { setCardColor(""); mark(); }}
+                className={`h-7 w-7 rounded-full border-2 transition ${cardColor === "" ? "border-[var(--primary-blue)]" : "border-transparent hover:border-[var(--stroke)]"} bg-[var(--surface)]`}
+                title="No color"
+              >
+                <span className="sr-only">None</span>
+              </button>
+              {COLOR_OPTIONS.map((c) => (
+                <button
+                  key={c.value}
+                  type="button"
+                  onClick={() => { setCardColor(c.value); mark(); }}
+                  className={`h-7 w-7 rounded-full border-2 transition ${cardColor === c.value ? "border-[var(--navy-dark)] scale-110" : "border-transparent hover:scale-105"}`}
+                  style={{ backgroundColor: c.hex }}
+                  title={c.label}
+                />
               ))}
             </div>
           </div>

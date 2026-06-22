@@ -67,9 +67,9 @@ describe("CardModal", () => {
 
   it("shows all priority options", () => {
     renderModal();
-    expect(screen.getByRole("button", { name: /low/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /medium/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /high/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^low$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^medium$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^high$/i })).toBeInTheDocument();
   });
 
   it("shows user dropdown with users", () => {

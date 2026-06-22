@@ -9,6 +9,7 @@ export type Card = {
   checklist_count?: number;
   checklist_done?: number;
   story_points?: number | null;
+  color?: string | null;
 };
 
 export type ChecklistItem = {

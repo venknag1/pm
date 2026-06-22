@@ -40,6 +40,7 @@ from .models import (
     LoginRequest,
     MoveCardRequest,
     MoveCardToBoardRequest,
+    MyWorkCard,
     RegisterRequest,
     RenameBoardRequest,
     RenameColumnRequest,
@@ -143,7 +144,7 @@ def _build_board_response(db, board_id: int) -> BoardResponse:
     ).fetchall()
     all_cards = db.execute(
         "SELECT c.id, c.column_id, c.title, c.details, c.due_date, c.priority, c.label,"
-        " c.assigned_to, c.story_points, u.username AS assigned_to_username"
+        " c.assigned_to, c.story_points, c.color, u.username AS assigned_to_username"
         " FROM cards c LEFT JOIN users u ON c.assigned_to = u.id"
         " WHERE c.board_id = ? AND c.archived = 0 ORDER BY c.position",
         (board_id,),
@@ -175,6 +176,7 @@ def _build_board_response(db, board_id: int) -> BoardResponse:
             checklist_count=cl_total,
             checklist_done=cl_done,
             story_points=card["story_points"],
+            color=card["color"],
         )
     return BoardResponse(
         columns=[
@@ -771,7 +773,7 @@ def update_card(
         raise HTTPException(status_code=404, detail="Card not found")
     with db:
         db.execute(
-            "UPDATE cards SET title = ?, details = ?, due_date = ?, priority = ?, label = ?, story_points = ?"
+            "UPDATE cards SET title = ?, details = ?, due_date = ?, priority = ?, label = ?, story_points = ?, color = ?"
             " WHERE id = ?",
             (
                 req.title if req.title is not None else card["title"],
@@ -780,6 +782,7 @@ def update_card(
                 req.priority if req.priority is not None else card["priority"],
                 req.label if req.label is not None else card["label"],
                 req.story_points,
+                req.color,
                 card_id,
             ),
         )
@@ -1339,7 +1342,7 @@ def global_search(
     pattern = f"%{q.strip()}%"
     rows = db.execute(
         "SELECT c.id, c.title, c.details, c.board_id, b.title AS board_title,"
-        " col.title AS column_title, c.priority, c.label, c.due_date, c.story_points"
+        " col.title AS column_title, c.priority, c.label, c.due_date, c.story_points, c.color"
         " FROM cards c"
         " JOIN boards b ON c.board_id = b.id"
         " JOIN columns col ON c.column_id = col.id"
@@ -1361,6 +1364,43 @@ def global_search(
             label=row["label"],
             due_date=row["due_date"],
             story_points=row["story_points"],
+            color=row["color"],
+        )
+        for row in rows
+    ]
+
+
+@app.get("/api/me/cards", response_model=list[MyWorkCard])
+def my_work_cards(
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    """Return all non-archived cards assigned to the current user across all their boards."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    rows = db.execute(
+        "SELECT c.id, c.title, c.details, c.board_id, b.title AS board_title,"
+        " col.title AS column_title, c.priority, c.label, c.due_date, c.story_points, c.color"
+        " FROM cards c"
+        " JOIN boards b ON c.board_id = b.id"
+        " JOIN columns col ON c.column_id = col.id"
+        " WHERE b.user_id = ? AND c.assigned_to = ? AND c.archived = 0"
+        " ORDER BY c.due_date NULLS LAST, c.priority DESC, b.id, c.position",
+        (user_id, user_id),
+    ).fetchall()
+    return [
+        MyWorkCard(
+            id=row["id"],
+            title=row["title"],
+            details=row["details"],
+            board_id=row["board_id"],
+            board_title=row["board_title"],
+            column_title=row["column_title"],
+            priority=row["priority"] or "medium",
+            due_date=row["due_date"],
+            label=row["label"],
+            story_points=row["story_points"],
+            color=row["color"],
+            is_overdue=bool(row["due_date"] and row["due_date"] < today),
         )
         for row in rows
     ]

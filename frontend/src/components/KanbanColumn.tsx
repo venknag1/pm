@@ -65,6 +65,7 @@ export const KanbanColumn = ({
   const [wipInput, setWipInput] = useState(column.wip_limit?.toString() ?? "");
   const [sortMode, setSortMode] = useState<SortMode>("default");
   const [showSortMenu, setShowSortMenu] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
 
   const isOverWip = column.wip_limit != null && cards.length > column.wip_limit;
   const sortedCards = useMemo(() => sortCards(cards, sortMode), [cards, sortMode]);
@@ -81,6 +82,34 @@ export const KanbanColumn = ({
       console.error(err);
     }
   };
+
+  if (collapsed) {
+    return (
+      <section
+        className="flex w-12 flex-col items-center rounded-2xl border border-[var(--stroke)] bg-[var(--surface-strong)] py-3 shadow-[var(--shadow)] transition"
+        data-testid={`column-${column.id}`}
+      >
+        <button
+          onClick={() => setCollapsed(false)}
+          className="flex h-5 w-5 items-center justify-center rounded-full text-[var(--gray-text)] transition hover:bg-[var(--surface)] hover:text-[var(--navy-dark)] mb-2"
+          title="Expand column"
+        >
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+            <path d="M4 2l4 3-4 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </button>
+        <div
+          className="flex-1 cursor-default overflow-hidden"
+          style={{ writingMode: "vertical-rl", textOrientation: "mixed" }}
+        >
+          <span className="select-none text-[11px] font-semibold text-[var(--navy-dark)]">{column.title}</span>
+        </div>
+        <span className="mt-2 rounded-full bg-[var(--surface)] px-1.5 py-0.5 text-[9px] font-semibold text-[var(--gray-text)]">
+          {cards.length}
+        </span>
+      </section>
+    );
+  }
 
   return (
     <section
@@ -150,6 +179,16 @@ export const KanbanColumn = ({
             <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
               <circle cx="5" cy="5" r="4" stroke="currentColor" strokeWidth="1.2"/>
               <path d="M5 3v2.5L6.5 7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+            </svg>
+          </button>
+          <button
+            onClick={() => setCollapsed(true)}
+            className="flex h-5 w-5 items-center justify-center rounded-full text-[var(--gray-text)] transition hover:bg-[var(--surface)] hover:text-[var(--navy-dark)]"
+            title="Collapse column"
+            aria-label={`Collapse column ${column.title}`}
+          >
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+              <path d="M6 2L2 5l4 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           </button>
           {canDelete && onDeleteColumn && (

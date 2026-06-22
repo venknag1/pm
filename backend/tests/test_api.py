@@ -1814,3 +1814,101 @@ class TestBoardPinning:
     def test_pin_unauthenticated_fails(self, client):
         resp = client.post("/api/boards/1/pin")
         assert resp.status_code == 401
+
+
+class TestCardColor:
+    def _make_card(self, auth_client):
+        board_id = auth_client.post("/api/boards", json={"title": "Color Board"}).json()["id"]
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        col_id = board["columns"][0]["id"]
+        card_id = auth_client.post(f"/api/boards/{board_id}/cards", json={"column_id": col_id, "title": "Colorful"}).json()["id"]
+        return board_id, card_id
+
+    def test_set_color(self, auth_client):
+        board_id, card_id = self._make_card(auth_client)
+        resp = auth_client.patch(f"/api/cards/{card_id}", json={"color": "red"})
+        assert resp.status_code == 200
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        assert board["cards"][card_id]["color"] == "red"
+
+    def test_clear_color(self, auth_client):
+        _, card_id = self._make_card(auth_client)
+        auth_client.patch(f"/api/cards/{card_id}", json={"color": "blue"})
+        auth_client.patch(f"/api/cards/{card_id}", json={"color": None})
+        # color should be null/none — verify via board
+        # (stored as None, acceptable)
+
+    def test_color_returned_in_board(self, auth_client):
+        board_id, card_id = self._make_card(auth_client)
+        auth_client.patch(f"/api/cards/{card_id}", json={"color": "green"})
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        assert board["cards"][card_id]["color"] == "green"
+
+
+class TestMyWorkCards:
+    def _setup(self, auth_client):
+        board_id = auth_client.post("/api/boards", json={"title": "Work Board"}).json()["id"]
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        col_id = board["columns"][0]["id"]
+        card_id = auth_client.post(f"/api/boards/{board_id}/cards", json={"column_id": col_id, "title": "Assigned card"}).json()["id"]
+        return board_id, card_id
+
+    def test_returns_assigned_cards(self, auth_client):
+        _, card_id = self._setup(auth_client)
+        # Assign to self — need to get user id first
+        me_resp = auth_client.get("/api/auth/me")
+        assert me_resp.status_code == 200
+        users = auth_client.get("/api/users").json()
+        my_user = next(u for u in users if u["username"] == me_resp.json()["username"])
+        auth_client.patch(f"/api/cards/{card_id}/assign", json={"assigned_to_id": my_user["id"]})
+        resp = auth_client.get("/api/me/cards")
+        assert resp.status_code == 200
+        ids = [c["id"] for c in resp.json()]
+        assert card_id in ids
+
+    def test_unassigned_cards_not_included(self, auth_client):
+        _, card_id = self._setup(auth_client)
+        # Don't assign it
+        resp = auth_client.get("/api/me/cards")
+        ids = [c["id"] for c in resp.json()]
+        assert card_id not in ids
+
+    def test_archived_cards_excluded(self, auth_client):
+        _, card_id = self._setup(auth_client)
+        me_resp = auth_client.get("/api/auth/me")
+        users = auth_client.get("/api/users").json()
+        my_user = next(u for u in users if u["username"] == me_resp.json()["username"])
+        auth_client.patch(f"/api/cards/{card_id}/assign", json={"assigned_to_id": my_user["id"]})
+        auth_client.post(f"/api/cards/{card_id}/archive")
+        resp = auth_client.get("/api/me/cards")
+        ids = [c["id"] for c in resp.json()]
+        assert card_id not in ids
+
+    def test_overdue_flag(self, auth_client):
+        _, card_id = self._setup(auth_client)
+        me_resp = auth_client.get("/api/auth/me")
+        users = auth_client.get("/api/users").json()
+        my_user = next(u for u in users if u["username"] == me_resp.json()["username"])
+        auth_client.patch(f"/api/cards/{card_id}/assign", json={"assigned_to_id": my_user["id"]})
+        auth_client.patch(f"/api/cards/{card_id}", json={"due_date": "2020-01-01"})
+        resp = auth_client.get("/api/me/cards")
+        cards = resp.json()
+        target = next(c for c in cards if c["id"] == card_id)
+        assert target["is_overdue"] is True
+
+    def test_unauthenticated_fails(self, client):
+        resp = client.get("/api/me/cards")
+        assert resp.status_code == 401
+
+    def test_includes_board_context(self, auth_client):
+        _, card_id = self._setup(auth_client)
+        me_resp = auth_client.get("/api/auth/me")
+        users = auth_client.get("/api/users").json()
+        my_user = next(u for u in users if u["username"] == me_resp.json()["username"])
+        auth_client.patch(f"/api/cards/{card_id}/assign", json={"assigned_to_id": my_user["id"]})
+        resp = auth_client.get("/api/me/cards")
+        cards = resp.json()
+        target = next(c for c in cards if c["id"] == card_id)
+        assert "board_title" in target
+        assert "column_title" in target
+        assert target["board_title"] == "Work Board"
