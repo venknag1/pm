@@ -29,12 +29,16 @@ class CardData(BaseModel):
     due_date: str | None = None
     priority: Literal["low", "medium", "high"] = "medium"
     label: str | None = None
+    assigned_to_username: str | None = None
+    checklist_count: int = 0
+    checklist_done: int = 0
 
 
 class ColumnData(BaseModel):
     id: str
     title: str
     cardIds: list[str]
+    wip_limit: int | None = None
 
 
 class BoardResponse(BaseModel):
@@ -72,6 +76,38 @@ class UpdateCardRequest(BaseModel):
     due_date: str | None = None
     priority: Literal["low", "medium", "high"] | None = None
     label: str | None = None
+
+
+class AssignCardRequest(BaseModel):
+    assigned_to_id: int | None = None
+
+
+class ChecklistItem(BaseModel):
+    id: str
+    title: str
+    completed: bool
+    position: int
+
+
+class CreateChecklistItemRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+
+
+class UpdateChecklistItemRequest(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    completed: bool | None = None
+
+
+class SetWipLimitRequest(BaseModel):
+    wip_limit: int | None = Field(default=None, ge=1)
+
+
+class BoardStats(BaseModel):
+    total_cards: int
+    cards_by_column: dict[str, int]
+    cards_by_priority: dict[str, int]
+    overdue_count: int
+    completed_column_id: str | None = None
 
 
 class MoveCardRequest(BaseModel):
@@ -136,3 +172,8 @@ class UserSummary(BaseModel):
     is_admin: bool
     created_at: str
     board_count: int = 0
+
+
+class UserBrief(BaseModel):
+    id: int
+    username: str

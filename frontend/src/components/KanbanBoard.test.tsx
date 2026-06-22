@@ -7,6 +7,8 @@ import { initialData } from "@/lib/kanban";
 
 vi.mock("@/lib/api", () => ({
   getBoardById: vi.fn(),
+  listUsers: vi.fn().mockResolvedValue([]),
+  getBoardStats: vi.fn().mockResolvedValue({ total_cards: 0, cards_by_column: {}, cards_by_priority: {}, overdue_count: 0, completed_column_id: null }),
   renameColumn: vi.fn().mockResolvedValue(undefined),
   createColumn: vi.fn().mockResolvedValue({ id: "col-new", title: "New Column" }),
   deleteColumn: vi.fn().mockResolvedValue(undefined),

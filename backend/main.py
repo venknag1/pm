@@ -17,14 +17,18 @@ from .db import get_db, init_db
 from .models import (
     AIRequest,
     AIResponseBody,
+    AssignCardRequest,
     BoardResponse,
+    BoardStats,
     BoardSummary,
     BoardUpdate,
     CardData,
     ChangePasswordRequest,
+    ChecklistItem,
     ColumnData,
     CreateBoardRequest,
     CreateCardRequest,
+    CreateChecklistItemRequest,
     CreateColumnRequest,
     LoginRequest,
     MoveCardRequest,
@@ -32,7 +36,10 @@ from .models import (
     RenameBoardRequest,
     RenameColumnRequest,
     ReorderColumnsRequest,
+    SetWipLimitRequest,
     UpdateCardRequest,
+    UpdateChecklistItemRequest,
+    UserBrief,
     UserSummary,
 )
 
@@ -115,18 +122,32 @@ def _get_board_by_id(db, board_id: int, user_id: int):
 
 def _build_board_response(db, board_id: int) -> BoardResponse:
     cols = db.execute(
-        "SELECT id, title FROM columns WHERE board_id = ? ORDER BY position",
+        "SELECT id, title, wip_limit FROM columns WHERE board_id = ? ORDER BY position",
         (board_id,),
     ).fetchall()
     all_cards = db.execute(
-        "SELECT id, column_id, title, details, due_date, priority, label"
-        " FROM cards WHERE board_id = ? ORDER BY position",
+        "SELECT c.id, c.column_id, c.title, c.details, c.due_date, c.priority, c.label,"
+        " c.assigned_to, u.username AS assigned_to_username"
+        " FROM cards c LEFT JOIN users u ON c.assigned_to = u.id"
+        " WHERE c.board_id = ? ORDER BY c.position",
         (board_id,),
     ).fetchall()
+
+    # Aggregate checklist counts per card in one query
+    checklist_counts = db.execute(
+        "SELECT ci.card_id, COUNT(*) AS total, SUM(ci.completed) AS done"
+        " FROM checklist_items ci"
+        " JOIN cards c ON ci.card_id = c.id"
+        " WHERE c.board_id = ? GROUP BY ci.card_id",
+        (board_id,),
+    ).fetchall()
+    checklist_map = {row["card_id"]: (row["total"], int(row["done"] or 0)) for row in checklist_counts}
+
     card_ids_by_col: dict[str, list[str]] = {col["id"]: [] for col in cols}
     cards_map: dict[str, CardData] = {}
     for card in all_cards:
         card_ids_by_col[card["column_id"]].append(card["id"])
+        cl_total, cl_done = checklist_map.get(card["id"], (0, 0))
         cards_map[card["id"]] = CardData(
             id=card["id"],
             title=card["title"],
@@ -134,10 +155,18 @@ def _build_board_response(db, board_id: int) -> BoardResponse:
             due_date=card["due_date"],
             priority=card["priority"] or "medium",
             label=card["label"],
+            assigned_to_username=card["assigned_to_username"],
+            checklist_count=cl_total,
+            checklist_done=cl_done,
         )
     return BoardResponse(
         columns=[
-            ColumnData(id=col["id"], title=col["title"], cardIds=card_ids_by_col[col["id"]])
+            ColumnData(
+                id=col["id"],
+                title=col["title"],
+                cardIds=card_ids_by_col[col["id"]],
+                wip_limit=col["wip_limit"],
+            )
             for col in cols
         ],
         cards=cards_map,
@@ -150,8 +179,10 @@ def _board_for_prompt(db, board_id: int) -> dict:
         (board_id,),
     ).fetchall()
     all_cards = db.execute(
-        "SELECT id, column_id, title, details, priority, due_date, label"
-        " FROM cards WHERE board_id = ? ORDER BY position",
+        "SELECT c.id, c.column_id, c.title, c.details, c.priority, c.due_date, c.label,"
+        " u.username AS assigned_to_username"
+        " FROM cards c LEFT JOIN users u ON c.assigned_to = u.id"
+        " WHERE c.board_id = ? ORDER BY c.position",
         (board_id,),
     ).fetchall()
     cards_by_col: dict[str, list[dict]] = {col["id"]: [] for col in cols}
@@ -166,6 +197,8 @@ def _board_for_prompt(db, board_id: int) -> dict:
             entry["due_date"] = card["due_date"]
         if card["label"]:
             entry["label"] = card["label"]
+        if card["assigned_to_username"]:
+            entry["assigned_to"] = card["assigned_to_username"]
         cards_by_col[card["column_id"]].append(entry)
     return {
         "columns": [
@@ -698,6 +731,264 @@ def delete_card(
             (card["column_id"], card["position"]),
         )
     return {"ok": True}
+
+
+@app.patch("/api/cards/{card_id}/assign")
+def assign_card(
+    card_id: str,
+    req: AssignCardRequest,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    card = db.execute(
+        "SELECT c.id, b.user_id FROM cards c JOIN boards b ON c.board_id = b.id WHERE c.id = ?",
+        (card_id,),
+    ).fetchone()
+    if not card or card["user_id"] != user_id:
+        raise HTTPException(status_code=404, detail="Card not found")
+    if req.assigned_to_id is not None:
+        user_exists = db.execute(
+            "SELECT 1 FROM users WHERE id = ?", (req.assigned_to_id,)
+        ).fetchone()
+        if not user_exists:
+            raise HTTPException(status_code=404, detail="User not found")
+    with db:
+        db.execute(
+            "UPDATE cards SET assigned_to = ? WHERE id = ?",
+            (req.assigned_to_id, card_id),
+        )
+    return {"ok": True}
+
+
+@app.post("/api/cards/{card_id}/duplicate", status_code=201)
+def duplicate_card(
+    card_id: str,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    card = db.execute(
+        "SELECT c.id, c.board_id, c.column_id, c.title, c.details, c.position,"
+        " c.due_date, c.priority, c.label, c.assigned_to, b.user_id"
+        " FROM cards c JOIN boards b ON c.board_id = b.id WHERE c.id = ?",
+        (card_id,),
+    ).fetchone()
+    if not card or card["user_id"] != user_id:
+        raise HTTPException(status_code=404, detail="Card not found")
+
+    new_id = _new_id("card")
+    with db:
+        # Insert after original card
+        db.execute(
+            "UPDATE cards SET position = position + 1"
+            " WHERE column_id = ? AND position > ?",
+            (card["column_id"], card["position"]),
+        )
+        db.execute(
+            "INSERT INTO cards (id, board_id, column_id, title, details, position,"
+            " due_date, priority, label, assigned_to)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                new_id, card["board_id"], card["column_id"],
+                card["title"] + " (copy)", card["details"],
+                card["position"] + 1,
+                card["due_date"], card["priority"], card["label"], card["assigned_to"],
+            ),
+        )
+    return {"id": new_id}
+
+
+# ---------------------------------------------------------------------------
+# Checklist
+# ---------------------------------------------------------------------------
+
+def _get_card_for_user(db, card_id: str, user_id: int):
+    """Return card row after verifying ownership."""
+    card = db.execute(
+        "SELECT c.id, c.board_id, b.user_id FROM cards c"
+        " JOIN boards b ON c.board_id = b.id WHERE c.id = ?",
+        (card_id,),
+    ).fetchone()
+    if not card or card["user_id"] != user_id:
+        raise HTTPException(status_code=404, detail="Card not found")
+    return card
+
+
+@app.get("/api/cards/{card_id}/checklist", response_model=list[ChecklistItem])
+def get_checklist(
+    card_id: str,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    _get_card_for_user(db, card_id, user_id)
+    items = db.execute(
+        "SELECT id, title, completed, position FROM checklist_items"
+        " WHERE card_id = ? ORDER BY position",
+        (card_id,),
+    ).fetchall()
+    return [
+        ChecklistItem(id=row["id"], title=row["title"], completed=bool(row["completed"]), position=row["position"])
+        for row in items
+    ]
+
+
+@app.post("/api/cards/{card_id}/checklist", status_code=201, response_model=ChecklistItem)
+def add_checklist_item(
+    card_id: str,
+    req: CreateChecklistItemRequest,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    _get_card_for_user(db, card_id, user_id)
+    max_pos = db.execute(
+        "SELECT COALESCE(MAX(position), -1) FROM checklist_items WHERE card_id = ?",
+        (card_id,),
+    ).fetchone()[0]
+    item_id = _new_id("chk")
+    with db:
+        db.execute(
+            "INSERT INTO checklist_items (id, card_id, title, completed, position)"
+            " VALUES (?, ?, ?, 0, ?)",
+            (item_id, card_id, req.title, max_pos + 1),
+        )
+    return ChecklistItem(id=item_id, title=req.title, completed=False, position=max_pos + 1)
+
+
+@app.patch("/api/cards/{card_id}/checklist/{item_id}", response_model=ChecklistItem)
+def update_checklist_item(
+    card_id: str,
+    item_id: str,
+    req: UpdateChecklistItemRequest,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    _get_card_for_user(db, card_id, user_id)
+    item = db.execute(
+        "SELECT id, title, completed, position FROM checklist_items WHERE id = ? AND card_id = ?",
+        (item_id, card_id),
+    ).fetchone()
+    if not item:
+        raise HTTPException(status_code=404, detail="Checklist item not found")
+    new_title = req.title if req.title is not None else item["title"]
+    new_completed = int(req.completed) if req.completed is not None else item["completed"]
+    with db:
+        db.execute(
+            "UPDATE checklist_items SET title = ?, completed = ? WHERE id = ?",
+            (new_title, new_completed, item_id),
+        )
+    return ChecklistItem(id=item_id, title=new_title, completed=bool(new_completed), position=item["position"])
+
+
+@app.delete("/api/cards/{card_id}/checklist/{item_id}")
+def delete_checklist_item(
+    card_id: str,
+    item_id: str,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    _get_card_for_user(db, card_id, user_id)
+    item = db.execute(
+        "SELECT position FROM checklist_items WHERE id = ? AND card_id = ?",
+        (item_id, card_id),
+    ).fetchone()
+    if not item:
+        raise HTTPException(status_code=404, detail="Checklist item not found")
+    with db:
+        db.execute("DELETE FROM checklist_items WHERE id = ?", (item_id,))
+        db.execute(
+            "UPDATE checklist_items SET position = position - 1"
+            " WHERE card_id = ? AND position > ?",
+            (card_id, item["position"]),
+        )
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Column WIP limit
+# ---------------------------------------------------------------------------
+
+@app.patch("/api/boards/{board_id}/columns/{column_id}/wip")
+def set_wip_limit(
+    board_id: int,
+    column_id: str,
+    req: SetWipLimitRequest,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    _get_board_by_id(db, board_id, user_id)
+    col = db.execute(
+        "SELECT id FROM columns WHERE id = ? AND board_id = ?", (column_id, board_id)
+    ).fetchone()
+    if not col:
+        raise HTTPException(status_code=404, detail="Column not found")
+    with db:
+        db.execute(
+            "UPDATE columns SET wip_limit = ? WHERE id = ?", (req.wip_limit, column_id)
+        )
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Board stats
+# ---------------------------------------------------------------------------
+
+@app.get("/api/boards/{board_id}/stats", response_model=BoardStats)
+def get_board_stats(
+    board_id: int,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    _get_board_by_id(db, board_id, user_id)
+
+    cols = db.execute(
+        "SELECT id, title FROM columns WHERE board_id = ? ORDER BY position",
+        (board_id,),
+    ).fetchall()
+
+    all_cards = db.execute(
+        "SELECT column_id, priority, due_date FROM cards WHERE board_id = ?",
+        (board_id,),
+    ).fetchall()
+
+    from datetime import date
+    today = date.today().isoformat()
+
+    cards_by_column: dict[str, int] = {col["id"]: 0 for col in cols}
+    cards_by_priority: dict[str, int] = {"low": 0, "medium": 0, "high": 0}
+    overdue_count = 0
+
+    for card in all_cards:
+        cards_by_column[card["column_id"]] = cards_by_column.get(card["column_id"], 0) + 1
+        pri = card["priority"] or "medium"
+        cards_by_priority[pri] = cards_by_priority.get(pri, 0) + 1
+        if card["due_date"] and card["due_date"] < today:
+            overdue_count += 1
+
+    # Identify "done" column (last column by position, or one titled "Done")
+    done_col_id = None
+    if cols:
+        done_col_id = cols[-1]["id"]
+        for col in cols:
+            if col["title"].lower() in ("done", "complete", "completed"):
+                done_col_id = col["id"]
+                break
+
+    return BoardStats(
+        total_cards=len(all_cards),
+        cards_by_column={col["title"]: cards_by_column.get(col["id"], 0) for col in cols},
+        cards_by_priority=cards_by_priority,
+        overdue_count=overdue_count,
+        completed_column_id=done_col_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Users list (for card assignment)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/users", response_model=list[UserBrief])
+def list_users(user_id: int = Depends(get_current_user_id), db=Depends(get_db)):
+    users = db.execute("SELECT id, username FROM users ORDER BY username").fetchall()
+    return [UserBrief(id=u["id"], username=u["username"]) for u in users]
 
 
 @app.patch("/api/cards/{card_id}/move")

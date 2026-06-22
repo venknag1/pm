@@ -17,6 +17,8 @@ import { AISidebar } from "@/components/AISidebar";
 import { moveCard, type BoardData, type Card } from "@/lib/kanban";
 import {
   getBoardById,
+  getBoardStats,
+  listUsers,
   renameColumn,
   createColumn,
   deleteColumn,
@@ -24,6 +26,8 @@ import {
   createCard,
   deleteCard,
   moveCard as moveCardApi,
+  type UserBrief,
+  type BoardStats,
 } from "@/lib/api";
 
 type KanbanBoardProps = {
@@ -47,6 +51,9 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
   const [newColumnTitle, setNewColumnTitle] = useState("");
   const [filter, setFilter] = useState<FilterState>({ search: "", priority: "all", label: "" });
   const [showFilter, setShowFilter] = useState(false);
+  const [users, setUsers] = useState<UserBrief[]>([]);
+  const [showStats, setShowStats] = useState(false);
+  const [stats, setStats] = useState<BoardStats | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
@@ -54,21 +61,34 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
 
   useEffect(() => {
     getBoardById(boardId).then(setBoard).catch(console.error);
+    listUsers().then(setUsers).catch(console.error);
   }, [boardId]);
+
+  const loadStats = async () => {
+    try {
+      const s = await getBoardStats(boardId);
+      setStats(s);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleToggleStats = () => {
+    if (!showStats) loadStats();
+    setShowStats((s) => !s);
+  };
 
   const cardsById = useMemo(() => board?.cards ?? {}, [board?.cards]);
 
-  // All unique labels used on this board
   const allLabels = useMemo(() => {
     const labels = new Set<string>();
     Object.values(board?.cards ?? {}).forEach((c) => { if (c.label) labels.add(c.label); });
     return Array.from(labels).sort();
   }, [board?.cards]);
 
-  // Filter cards based on current filter state
   const filteredCardIds = useMemo(() => {
     const { search, priority, label } = filter;
-    if (!search && priority === "all" && !label) return null; // no filter active
+    if (!search && priority === "all" && !label) return null;
     const lc = search.toLowerCase();
     return new Set(
       Object.values(cardsById)
@@ -91,7 +111,6 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
     setActiveCardId(null);
     if (!over || active.id === over.id || !board) return;
 
-    // Check if dragging a column
     if (board.columns.some((c) => c.id === active.id)) {
       const oldIndex = board.columns.findIndex((c) => c.id === active.id);
       const newIndex = board.columns.findIndex((c) => c.id === over.id);
@@ -200,16 +219,37 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
       if (!prev) return null;
       return {
         ...prev,
-        cards: {
-          ...prev.cards,
-          [cardId]: { ...prev.cards[cardId], ...updates },
-        },
+        cards: { ...prev.cards, [cardId]: { ...prev.cards[cardId], ...updates } },
       };
     });
   };
 
-  const activeCard = activeCardId ? cardsById[activeCardId] : null;
+  // Insert a duplicated card right after the source card in the same column
+  const handleDuplicateCard = (sourceCardId: string, newCard: Card) => {
+    setBoard((prev) => {
+      if (!prev) return null;
+      const col = prev.columns.find((c) => c.cardIds.includes(sourceCardId));
+      if (!col) return prev;
+      const idx = col.cardIds.indexOf(sourceCardId);
+      const newCardIds = [...col.cardIds];
+      newCardIds.splice(idx + 1, 0, newCard.id);
+      return {
+        ...prev,
+        cards: { ...prev.cards, [newCard.id]: newCard },
+        columns: prev.columns.map((c) => c.id === col.id ? { ...c, cardIds: newCardIds } : c),
+      };
+    });
+  };
 
+  const handleWipChange = (columnId: string, limit: number | null) => {
+    setBoard((prev) =>
+      prev
+        ? { ...prev, columns: prev.columns.map((c) => c.id === columnId ? { ...c, wip_limit: limit } : c) }
+        : null
+    );
+  };
+
+  const activeCard = activeCardId ? cardsById[activeCardId] : null;
   const filterActive = filter.search || filter.priority !== "all" || filter.label;
 
   if (!board) {
@@ -252,6 +292,21 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <button
+              onClick={handleToggleStats}
+              className={`flex items-center gap-2 rounded-xl border px-4 py-2 text-xs font-semibold uppercase tracking-[0.15em] transition ${
+                showStats
+                  ? "border-[var(--accent-yellow)] bg-[var(--accent-yellow)] text-[var(--navy-dark)]"
+                  : "border-[var(--stroke)] bg-[var(--surface)] text-[var(--gray-text)] hover:border-[var(--accent-yellow)] hover:text-[var(--navy-dark)]"
+              }`}
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                <rect x="1" y="7" width="3" height="6" rx="0.8" fill="currentColor" opacity="0.6"/>
+                <rect x="5.5" y="4" width="3" height="9" rx="0.8" fill="currentColor" opacity="0.8"/>
+                <rect x="10" y="1" width="3" height="12" rx="0.8" fill="currentColor"/>
+              </svg>
+              Stats
+            </button>
             <button
               onClick={() => setShowFilter((f) => !f)}
               className={`flex items-center gap-2 rounded-xl border px-4 py-2 text-xs font-semibold uppercase tracking-[0.15em] transition ${
@@ -296,6 +351,37 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
             </button>
           </div>
         </header>
+
+        {showStats && stats && (
+          <div className="grid grid-cols-2 gap-4 rounded-2xl border border-[var(--stroke)] bg-white/80 p-5 shadow-[var(--shadow)] backdrop-blur sm:grid-cols-4">
+            <div className="flex flex-col gap-1">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">Total Cards</p>
+              <p className="font-display text-2xl font-semibold text-[var(--navy-dark)]">{stats.total_cards}</p>
+            </div>
+            <div className="flex flex-col gap-1">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">Overdue</p>
+              <p className={`font-display text-2xl font-semibold ${stats.overdue_count > 0 ? "text-red-500" : "text-[var(--navy-dark)]"}`}>
+                {stats.overdue_count}
+              </p>
+            </div>
+            <div className="flex flex-col gap-1">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">By Priority</p>
+              <div className="flex flex-col gap-0.5 text-xs text-[var(--gray-text)]">
+                <span className="text-red-500">High: {stats.cards_by_priority.high ?? 0}</span>
+                <span className="text-amber-500">Medium: {stats.cards_by_priority.medium ?? 0}</span>
+                <span className="text-emerald-600">Low: {stats.cards_by_priority.low ?? 0}</span>
+              </div>
+            </div>
+            <div className="flex flex-col gap-1">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">By Column</p>
+              <div className="flex flex-col gap-0.5 text-xs text-[var(--gray-text)]">
+                {Object.entries(stats.cards_by_column).map(([col, count]) => (
+                  <span key={col}>{col}: {count}</span>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         {showFilter && (
           <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-[var(--stroke)] bg-white/80 px-5 py-3 shadow-[var(--shadow)] backdrop-blur">
@@ -404,11 +490,15 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
                   <KanbanColumn
                     column={column}
                     cards={visibleCards}
+                    boardId={boardId}
+                    users={users}
                     onRename={handleRenameColumn}
                     onAddCard={handleAddCard}
                     onDeleteCard={handleDeleteCard}
                     onUpdateCard={handleUpdateCard}
+                    onDuplicateCard={handleDuplicateCard}
                     onDeleteColumn={handleDeleteColumn}
+                    onWipChange={handleWipChange}
                     canDelete={board.columns.length > 1}
                   />
                 </div>

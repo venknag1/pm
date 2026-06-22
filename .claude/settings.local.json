@@ -11,7 +11,8 @@
       "Bash(python -m pytest tests/test_api.py -x -q)",
       "Bash(python -m pytest tests/test_api.py -q)",
       "Bash(npx tsc *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(python -m pytest tests/test_api.py::TestCardAssign::test_assign_other_users_card_fails tests/test_api.py::TestWipLimit::test_wip_limit_wrong_board_fails -v)"
     ]
   }
 }

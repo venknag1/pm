@@ -1100,3 +1100,245 @@ class TestAdmin:
         resp = admin_client.get("/api/admin/users")
         usernames = [u["username"] for u in resp.json()]
         assert "withboards" not in usernames
+
+
+class TestCardAssign:
+    def _make_card(self, auth_client):
+        resp = auth_client.get("/api/board")
+        col_id = resp.json()["columns"][0]["id"]
+        resp = auth_client.post("/api/cards", json={"column_id": col_id, "title": "Assign me"})
+        return resp.json()["id"]
+
+    def _user_id(self, auth_client, username):
+        for u in auth_client.get("/api/users").json():
+            if u["username"] == username:
+                return u["id"]
+        return None
+
+    def test_list_users(self, auth_client):
+        resp = auth_client.get("/api/users")
+        assert resp.status_code == 200
+        usernames = [u["username"] for u in resp.json()]
+        assert "user" in usernames
+        assert "admin" in usernames
+
+    def test_assign_card(self, auth_client):
+        card_id = self._make_card(auth_client)
+        uid = self._user_id(auth_client, "admin")
+        resp = auth_client.patch(f"/api/cards/{card_id}/assign", json={"assigned_to_id": uid})
+        assert resp.status_code == 200
+        card = auth_client.get("/api/board").json()["cards"][card_id]
+        assert card["assigned_to_username"] == "admin"
+
+    def test_unassign_card(self, auth_client):
+        card_id = self._make_card(auth_client)
+        uid = self._user_id(auth_client, "admin")
+        auth_client.patch(f"/api/cards/{card_id}/assign", json={"assigned_to_id": uid})
+        auth_client.patch(f"/api/cards/{card_id}/assign", json={"assigned_to_id": None})
+        card = auth_client.get("/api/board").json()["cards"][card_id]
+        assert card["assigned_to_username"] is None
+
+    def test_assign_nonexistent_user(self, auth_client):
+        card_id = self._make_card(auth_client)
+        resp = auth_client.patch(f"/api/cards/{card_id}/assign", json={"assigned_to_id": 99999})
+        assert resp.status_code == 404
+
+    def test_assign_other_users_card_fails(self, client, admin_client):
+        board = admin_client.get("/api/board").json()
+        col_id = board["columns"][0]["id"]
+        card_id = admin_client.post("/api/cards", json={"column_id": col_id, "title": "Admin card"}).json()["id"]
+        # switch to regular user
+        client.post("/api/auth/login", json={"username": "user", "password": "password"})
+        resp = client.patch(f"/api/cards/{card_id}/assign", json={"assigned_to_id": None})
+        assert resp.status_code == 404
+
+
+class TestCardDuplicate:
+    def _make_card(self, auth_client, **kwargs):
+        resp = auth_client.get("/api/board")
+        col_id = resp.json()["columns"][0]["id"]
+        payload = {"column_id": col_id, "title": "Original", **kwargs}
+        resp = auth_client.post("/api/cards", json=payload)
+        return resp.json()["id"]
+
+    def test_duplicate_card(self, auth_client):
+        card_id = self._make_card(auth_client, details="Some detail", priority="high")
+        resp = auth_client.post(f"/api/cards/{card_id}/duplicate")
+        assert resp.status_code == 201
+        new_id = resp.json()["id"]
+        assert new_id != card_id
+        new_card = auth_client.get("/api/board").json()["cards"][new_id]
+        assert "copy" in new_card["title"].lower()
+        assert new_card["details"] == "Some detail"
+        assert new_card["priority"] == "high"
+
+    def test_duplicate_lands_in_same_column(self, auth_client):
+        board = auth_client.get("/api/board").json()
+        col_id = board["columns"][2]["id"]
+        resp = auth_client.post("/api/cards", json={"column_id": col_id, "title": "Mid card"})
+        card_id = resp.json()["id"]
+        resp = auth_client.post(f"/api/cards/{card_id}/duplicate")
+        new_id = resp.json()["id"]
+        board = auth_client.get("/api/board").json()
+        col = next(c for c in board["columns"] if c["id"] == col_id)
+        assert new_id in col["cardIds"]
+
+    def test_duplicate_other_users_card_fails(self, client, admin_client):
+        board = admin_client.get("/api/board").json()
+        col_id = board["columns"][0]["id"]
+        card_id = admin_client.post("/api/cards", json={"column_id": col_id, "title": "Admin only"}).json()["id"]
+        client.post("/api/auth/login", json={"username": "user", "password": "password"})
+        resp = client.post(f"/api/cards/{card_id}/duplicate")
+        assert resp.status_code == 404
+
+    def test_duplicate_nonexistent_card(self, auth_client):
+        resp = auth_client.post("/api/cards/card-nope/duplicate")
+        assert resp.status_code == 404
+
+
+class TestChecklist:
+    def _make_card(self, auth_client):
+        col_id = auth_client.get("/api/board").json()["columns"][0]["id"]
+        resp = auth_client.post("/api/cards", json={"column_id": col_id, "title": "Card"})
+        return resp.json()["id"]
+
+    def test_empty_checklist(self, auth_client):
+        card_id = self._make_card(auth_client)
+        resp = auth_client.get(f"/api/cards/{card_id}/checklist")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_add_checklist_item(self, auth_client):
+        card_id = self._make_card(auth_client)
+        resp = auth_client.post(f"/api/cards/{card_id}/checklist", json={"title": "Do something"})
+        assert resp.status_code == 201
+        item = resp.json()
+        assert item["title"] == "Do something"
+        assert item["completed"] is False
+        assert item["id"].startswith("chk-")
+
+    def test_get_checklist_items_ordered(self, auth_client):
+        card_id = self._make_card(auth_client)
+        auth_client.post(f"/api/cards/{card_id}/checklist", json={"title": "Step 1"})
+        auth_client.post(f"/api/cards/{card_id}/checklist", json={"title": "Step 2"})
+        items = auth_client.get(f"/api/cards/{card_id}/checklist").json()
+        assert len(items) == 2
+        assert items[0]["title"] == "Step 1"
+        assert items[1]["title"] == "Step 2"
+
+    def test_complete_item(self, auth_client):
+        card_id = self._make_card(auth_client)
+        item_id = auth_client.post(f"/api/cards/{card_id}/checklist", json={"title": "Step"}).json()["id"]
+        resp = auth_client.patch(f"/api/cards/{card_id}/checklist/{item_id}", json={"completed": True})
+        assert resp.status_code == 200
+        assert resp.json()["completed"] is True
+
+    def test_update_item_title(self, auth_client):
+        card_id = self._make_card(auth_client)
+        item_id = auth_client.post(f"/api/cards/{card_id}/checklist", json={"title": "Old"}).json()["id"]
+        resp = auth_client.patch(f"/api/cards/{card_id}/checklist/{item_id}", json={"title": "New"})
+        assert resp.json()["title"] == "New"
+
+    def test_delete_item(self, auth_client):
+        card_id = self._make_card(auth_client)
+        item_id = auth_client.post(f"/api/cards/{card_id}/checklist", json={"title": "Remove"}).json()["id"]
+        auth_client.delete(f"/api/cards/{card_id}/checklist/{item_id}")
+        items = auth_client.get(f"/api/cards/{card_id}/checklist").json()
+        assert not any(i["id"] == item_id for i in items)
+
+    def test_checklist_counts_in_board(self, auth_client):
+        card_id = self._make_card(auth_client)
+        auth_client.post(f"/api/cards/{card_id}/checklist", json={"title": "A"})
+        item_id = auth_client.post(f"/api/cards/{card_id}/checklist", json={"title": "B"}).json()["id"]
+        auth_client.patch(f"/api/cards/{card_id}/checklist/{item_id}", json={"completed": True})
+        card = auth_client.get("/api/board").json()["cards"][card_id]
+        assert card["checklist_count"] == 2
+        assert card["checklist_done"] == 1
+
+    def test_delete_nonexistent_item(self, auth_client):
+        card_id = self._make_card(auth_client)
+        resp = auth_client.delete(f"/api/cards/{card_id}/checklist/chk-fake")
+        assert resp.status_code == 404
+
+    def test_checklist_on_other_users_card_fails(self, client, admin_client):
+        col_id = admin_client.get("/api/board").json()["columns"][0]["id"]
+        card_id = admin_client.post("/api/cards", json={"column_id": col_id, "title": "Admin"}).json()["id"]
+        client.post("/api/auth/login", json={"username": "user", "password": "password"})
+        resp = client.get(f"/api/cards/{card_id}/checklist")
+        assert resp.status_code == 404
+
+    def test_empty_title_rejected(self, auth_client):
+        card_id = self._make_card(auth_client)
+        resp = auth_client.post(f"/api/cards/{card_id}/checklist", json={"title": ""})
+        assert resp.status_code == 422
+
+
+class TestWipLimit:
+    def _board_and_col(self, auth_client):
+        board_id = auth_client.get("/api/boards").json()[0]["id"]
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        return board_id, board["columns"][0]["id"]
+
+    def test_set_wip_limit(self, auth_client):
+        board_id, col_id = self._board_and_col(auth_client)
+        resp = auth_client.patch(f"/api/boards/{board_id}/columns/{col_id}/wip", json={"wip_limit": 3})
+        assert resp.status_code == 200
+        col = next(c for c in auth_client.get(f"/api/boards/{board_id}").json()["columns"] if c["id"] == col_id)
+        assert col["wip_limit"] == 3
+
+    def test_clear_wip_limit(self, auth_client):
+        board_id, col_id = self._board_and_col(auth_client)
+        auth_client.patch(f"/api/boards/{board_id}/columns/{col_id}/wip", json={"wip_limit": 5})
+        auth_client.patch(f"/api/boards/{board_id}/columns/{col_id}/wip", json={"wip_limit": None})
+        col = next(c for c in auth_client.get(f"/api/boards/{board_id}").json()["columns"] if c["id"] == col_id)
+        assert col["wip_limit"] is None
+
+    def test_wip_limit_zero_rejected(self, auth_client):
+        board_id, col_id = self._board_and_col(auth_client)
+        resp = auth_client.patch(f"/api/boards/{board_id}/columns/{col_id}/wip", json={"wip_limit": 0})
+        assert resp.status_code == 422
+
+    def test_wip_limit_wrong_board_fails(self, client, admin_client):
+        admin_board_id = admin_client.get("/api/boards").json()[0]["id"]
+        col_id = admin_client.get(f"/api/boards/{admin_board_id}").json()["columns"][0]["id"]
+        client.post("/api/auth/login", json={"username": "user", "password": "password"})
+        resp = client.patch(f"/api/boards/{admin_board_id}/columns/{col_id}/wip", json={"wip_limit": 2})
+        assert resp.status_code == 404
+
+
+class TestBoardStats:
+    def _board_id(self, auth_client):
+        return auth_client.get("/api/boards").json()[0]["id"]
+
+    def test_stats_empty_board(self, auth_client):
+        board_id = self._board_id(auth_client)
+        resp = auth_client.get(f"/api/boards/{board_id}/stats")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_cards"] == 0
+        assert data["overdue_count"] == 0
+
+    def test_stats_with_cards(self, auth_client):
+        board_id = self._board_id(auth_client)
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        col_id = board["columns"][0]["id"]
+        auth_client.post(f"/api/boards/{board_id}/cards", json={"column_id": col_id, "title": "A", "priority": "high"})
+        auth_client.post(f"/api/boards/{board_id}/cards", json={"column_id": col_id, "title": "B", "priority": "low"})
+        data = auth_client.get(f"/api/boards/{board_id}/stats").json()
+        assert data["total_cards"] == 2
+        assert data["cards_by_priority"]["high"] == 1
+        assert data["cards_by_priority"]["low"] == 1
+
+    def test_stats_overdue(self, auth_client):
+        board_id = self._board_id(auth_client)
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        col_id = board["columns"][0]["id"]
+        auth_client.post(f"/api/boards/{board_id}/cards", json={"column_id": col_id, "title": "Old", "due_date": "2020-01-01"})
+        data = auth_client.get(f"/api/boards/{board_id}/stats").json()
+        assert data["overdue_count"] == 1
+
+    def test_stats_wrong_board_fails(self, client, admin_client):
+        admin_board_id = admin_client.get("/api/boards").json()[0]["id"]
+        client.post("/api/auth/login", json={"username": "user", "password": "password"})
+        resp = client.get(f"/api/boards/{admin_board_id}/stats")
+        assert resp.status_code == 404

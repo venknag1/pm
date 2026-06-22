@@ -1,4 +1,4 @@
-import type { BoardData } from "./kanban";
+import type { BoardData, ChecklistItem } from "./kanban";
 
 export type ChatMessage = {
   role: "user" | "assistant";
@@ -185,6 +185,88 @@ export async function moveCard(
     method: "PATCH",
     body: JSON.stringify({ column_id: columnId, position }),
   });
+}
+
+export async function assignCard(cardId: string, assignedToId: number | null): Promise<void> {
+  await request(`/api/cards/${cardId}/assign`, {
+    method: "PATCH",
+    body: JSON.stringify({ assigned_to_id: assignedToId }),
+  });
+}
+
+export async function duplicateCard(cardId: string): Promise<{ id: string }> {
+  const resp = await request(`/api/cards/${cardId}/duplicate`, { method: "POST" });
+  if (!resp.ok) throw new Error("Failed to duplicate card");
+  return resp.json();
+}
+
+// --- Checklist ---
+
+export async function getChecklist(cardId: string): Promise<ChecklistItem[]> {
+  const resp = await request(`/api/cards/${cardId}/checklist`);
+  if (!resp.ok) throw new Error("Failed to load checklist");
+  return resp.json();
+}
+
+export async function addChecklistItem(cardId: string, title: string): Promise<ChecklistItem> {
+  const resp = await request(`/api/cards/${cardId}/checklist`, {
+    method: "POST",
+    body: JSON.stringify({ title }),
+  });
+  if (!resp.ok) throw new Error("Failed to add checklist item");
+  return resp.json();
+}
+
+export async function updateChecklistItem(
+  cardId: string,
+  itemId: string,
+  updates: { title?: string; completed?: boolean }
+): Promise<ChecklistItem> {
+  const resp = await request(`/api/cards/${cardId}/checklist/${itemId}`, {
+    method: "PATCH",
+    body: JSON.stringify(updates),
+  });
+  if (!resp.ok) throw new Error("Failed to update checklist item");
+  return resp.json();
+}
+
+export async function deleteChecklistItem(cardId: string, itemId: string): Promise<void> {
+  await request(`/api/cards/${cardId}/checklist/${itemId}`, { method: "DELETE" });
+}
+
+// --- WIP limit ---
+
+export async function setWipLimit(boardId: number, columnId: string, wipLimit: number | null): Promise<void> {
+  await request(`/api/boards/${boardId}/columns/${columnId}/wip`, {
+    method: "PATCH",
+    body: JSON.stringify({ wip_limit: wipLimit }),
+  });
+}
+
+// --- Board stats ---
+
+export type BoardStats = {
+  total_cards: number;
+  cards_by_column: Record<string, number>;
+  cards_by_priority: Record<string, number>;
+  overdue_count: number;
+  completed_column_id: string | null;
+};
+
+export async function getBoardStats(boardId: number): Promise<BoardStats> {
+  const resp = await request(`/api/boards/${boardId}/stats`);
+  if (!resp.ok) throw new Error("Failed to load stats");
+  return resp.json();
+}
+
+// --- Users ---
+
+export type UserBrief = { id: number; username: string };
+
+export async function listUsers(): Promise<UserBrief[]> {
+  const resp = await request("/api/users");
+  if (!resp.ok) throw new Error("Failed to load users");
+  return resp.json();
 }
 
 // --- AI ---

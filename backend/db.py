@@ -58,13 +58,19 @@ def _migrate(conn: sqlite3.Connection) -> None:
             ALTER TABLE boards_new RENAME TO boards;
         """)
 
-    # Add due_date, priority, label to cards if missing
+    # Add due_date, priority, label, assigned_to to cards if missing
     if not _has_column(conn, "cards", "due_date"):
         conn.execute("ALTER TABLE cards ADD COLUMN due_date TEXT")
     if not _has_column(conn, "cards", "priority"):
         conn.execute("ALTER TABLE cards ADD COLUMN priority TEXT NOT NULL DEFAULT 'medium'")
     if not _has_column(conn, "cards", "label"):
         conn.execute("ALTER TABLE cards ADD COLUMN label TEXT")
+    if not _has_column(conn, "cards", "assigned_to"):
+        conn.execute("ALTER TABLE cards ADD COLUMN assigned_to INTEGER")
+
+    # Add wip_limit to columns if missing
+    if not _has_column(conn, "columns", "wip_limit"):
+        conn.execute("ALTER TABLE columns ADD COLUMN wip_limit INTEGER")
 
     conn.commit()
 
@@ -94,6 +100,7 @@ def init_db() -> None:
                 board_id INTEGER NOT NULL,
                 title TEXT NOT NULL,
                 position INTEGER NOT NULL,
+                wip_limit INTEGER,
                 FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE
             );
             CREATE TABLE IF NOT EXISTS cards (
@@ -106,8 +113,17 @@ def init_db() -> None:
                 due_date TEXT,
                 priority TEXT NOT NULL DEFAULT 'medium',
                 label TEXT,
+                assigned_to INTEGER,
                 FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE,
                 FOREIGN KEY (column_id) REFERENCES columns(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS checklist_items (
+                id TEXT PRIMARY KEY,
+                card_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                completed INTEGER NOT NULL DEFAULT 0,
+                position INTEGER NOT NULL,
+                FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE
             );
         """)
 

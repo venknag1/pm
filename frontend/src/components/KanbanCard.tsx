@@ -3,6 +3,7 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import clsx from "clsx";
 import type { Card } from "@/lib/kanban";
+import type { UserBrief } from "@/lib/api";
 import { CardModal } from "@/components/CardModal";
 
 const PRIORITY_COLORS = {
@@ -23,13 +24,19 @@ function labelColor(label: string): string {
   return LABEL_COLORS[label.toLowerCase()] ?? "bg-gray-100 text-gray-600";
 }
 
+function userInitials(username: string): string {
+  return username.slice(0, 2).toUpperCase();
+}
+
 type KanbanCardProps = {
   card: Card;
+  users: UserBrief[];
   onDelete: (cardId: string) => void;
   onUpdate: (cardId: string, updates: Partial<Card>) => void;
+  onDuplicate?: (colId: string, newCard: Card) => void;
 };
 
-export const KanbanCard = ({ card, onDelete, onUpdate }: KanbanCardProps) => {
+export const KanbanCard = ({ card, users, onDelete, onUpdate, onDuplicate }: KanbanCardProps) => {
   const [modalOpen, setModalOpen] = useState(false);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: card.id });
@@ -41,6 +48,8 @@ export const KanbanCard = ({ card, onDelete, onUpdate }: KanbanCardProps) => {
 
   const isOverdue =
     card.due_date && new Date(card.due_date) < new Date(new Date().toDateString());
+
+  const hasChecklist = (card.checklist_count ?? 0) > 0;
 
   return (
     <>
@@ -90,19 +99,44 @@ export const KanbanCard = ({ card, onDelete, onUpdate }: KanbanCardProps) => {
             {card.details}
           </p>
         )}
-        {card.due_date && (
-          <p className={clsx("mt-2 text-[10px] font-semibold", isOverdue ? "text-red-500" : "text-[var(--gray-text)]")}>
-            Due {new Date(card.due_date + "T00:00:00").toLocaleDateString()}
-            {isOverdue && " (overdue)"}
-          </p>
-        )}
+
+        <div className="mt-2 flex items-center gap-2">
+          {card.due_date && (
+            <p className={clsx("text-[10px] font-semibold", isOverdue ? "text-red-500" : "text-[var(--gray-text)]")}>
+              Due {new Date(card.due_date + "T00:00:00").toLocaleDateString()}
+              {isOverdue && " (overdue)"}
+            </p>
+          )}
+          {hasChecklist && (
+            <span className={clsx(
+              "flex items-center gap-0.5 text-[10px] font-semibold",
+              card.checklist_done === card.checklist_count ? "text-emerald-600" : "text-[var(--gray-text)]"
+            )}>
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+                <rect x="1" y="1" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.2"/>
+                <path d="M3 5l1.5 1.5L7 3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              {card.checklist_done}/{card.checklist_count}
+            </span>
+          )}
+          {card.assigned_to_username && (
+            <span
+              className="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--secondary-purple)] text-[9px] font-bold text-white"
+              title={card.assigned_to_username}
+            >
+              {userInitials(card.assigned_to_username)}
+            </span>
+          )}
+        </div>
       </article>
 
       {modalOpen && (
         <CardModal
           card={card}
+          users={users}
           onClose={() => setModalOpen(false)}
           onUpdate={onUpdate}
+          onDuplicate={(newId) => onDuplicate?.(card.id, { ...card, id: newId, title: card.title + " (copy)", checklist_count: 0, checklist_done: 0 })}
         />
       )}
     </>
