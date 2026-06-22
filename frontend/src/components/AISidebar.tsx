@@ -35,10 +35,11 @@ export const AISidebar = ({ onClose, onBoardUpdate }: AISidebarProps) => {
       if (result.board) {
         onBoardUpdate(result.board);
       }
-    } catch {
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Something went wrong. Please try again.";
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: "Something went wrong. Please try again." },
+        { role: "assistant", content: msg },
       ]);
     } finally {
       setLoading(false);

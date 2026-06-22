@@ -32,24 +32,32 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 AI_MODEL = "meta-llama/llama-3.3-70b-instruct"
 
 _AI_SYSTEM_PROMPT = """\
-You are a helpful project management assistant for a Kanban board.
+You are a helpful assistant for a Kanban board. You can read and modify the board.
 
-Current board state:
+Board state — columns are listed in left-to-right order; the "position" field is their \
+0-based index (0 = leftmost):
 {board_json}
 
-Respond with a JSON object in this exact format:
-{{
-  "reply": "Your response to the user",
-  "board_update": null
-}}
+Respond ONLY with a valid JSON object. No text outside the JSON.
 
-To modify the board, set board_update to an object with any of these optional keys:
-  "create_cards": [{{"column_id": "<id>", "title": "<title>", "details": "<optional>"}}]
-  "delete_card_ids": ["<card-id>"]
-  "move_cards": [{{"card_id": "<id>", "column_id": "<target-col-id>", "position": <int>}}]
-  "rename_columns": [{{"column_id": "<id>", "title": "<new-title>"}}]
+When the user asks a question only:
+{{"reply": "<answer>", "board_update": null}}
 
-Use exact IDs from the board state. Set board_update to null if no changes are needed.\
+When the user asks for board changes:
+{{"reply": "<confirmation>", "board_update": {{"move_cards": [...], "create_cards": [...], "delete_card_ids": [...], "rename_columns": [...]}}}}
+
+board_update fields (all are optional lists — omit any you don't need):
+  "move_cards"      — [{{"card_id": "<id>", "column_id": "<target-column-id>", "position": <0-based slot in target column>}}]
+  "create_cards"    — [{{"column_id": "<id>", "title": "<title>", "details": "<details>"}}]
+  "delete_card_ids" — ["<card-id>"]
+  "rename_columns"  — [{{"column_id": "<id>", "title": "<new-title>"}}]
+
+Rules:
+- Use exact IDs from the board state — never invent IDs.
+- "Left" means the column at position N-1; "right" means position N+1.
+- Cards already in the leftmost column (position 0) cannot go further left — skip them.
+- position inside move_cards is the 0-based index within the destination column.
+- When the user asks for changes, board_update must NOT be null.\
 """
 
 
@@ -129,8 +137,8 @@ def _board_for_prompt(db, user_id: int) -> dict:
         })
     return {
         "columns": [
-            {"id": col["id"], "title": col["title"], "cards": cards_by_col[col["id"]]}
-            for col in cols
+            {"position": i, "id": col["id"], "title": col["title"], "cards": cards_by_col[col["id"]]}
+            for i, col in enumerate(cols)
         ]
     }
 
@@ -461,20 +469,37 @@ async def ai_chat(
     messages.append({"role": "user", "content": req.message})
 
     client = AsyncOpenAI(api_key=api_key, base_url=OPENROUTER_BASE_URL)
-    completion = await client.chat.completions.create(
-        model=AI_MODEL,
-        messages=messages,
-        response_format={"type": "json_object"},
-    )
+    try:
+        completion = await client.chat.completions.create(
+            model=AI_MODEL,
+            messages=messages,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"AI service error: {exc}") from exc
 
-    raw = completion.choices[0].message.content
+    raw = completion.choices[0].message.content or ""
+    print(f"[AI raw] {raw[:800]}", flush=True)
+
+    # Strip markdown code fences
+    stripped = raw.strip()
+    if stripped.startswith("```"):
+        stripped = stripped.split("\n", 1)[-1]
+        stripped = stripped.rsplit("```", 1)[0].strip()
+
+    # If the model prefixed preamble text, find the outermost JSON object
+    if not stripped.startswith("{"):
+        start = stripped.find("{")
+        end = stripped.rfind("}") + 1
+        if start != -1 and end > start:
+            stripped = stripped[start:end]
 
     try:
-        parsed = json.loads(raw)
+        parsed = json.loads(stripped)
         reply = str(parsed.get("reply", ""))
         raw_update = parsed.get("board_update")
     except (json.JSONDecodeError, AttributeError):
-        return AIResponseBody(reply=raw or "", board=None)
+        print(f"[AI parse error] could not parse: {stripped[:400]}", flush=True)
+        return AIResponseBody(reply=raw, board=None)
 
     updated_board = None
     if raw_update and isinstance(raw_update, dict):

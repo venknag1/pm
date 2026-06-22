@@ -78,6 +78,9 @@ export async function sendAIMessage(
     method: "POST",
     body: JSON.stringify({ message, history }),
   });
-  if (!resp.ok) throw new Error("AI request failed");
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    throw new Error(body?.detail ?? "AI request failed");
+  }
   return resp.json();
 }
