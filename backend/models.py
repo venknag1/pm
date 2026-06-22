@@ -8,10 +8,18 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class RegisterRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=50)
+    password: str = Field(min_length=6)
+
+
 class CardData(BaseModel):
     id: str
     title: str
     details: str
+    due_date: str | None = None
+    priority: Literal["low", "medium", "high"] = "medium"
+    label: str | None = None
 
 
 class ColumnData(BaseModel):
@@ -25,7 +33,18 @@ class BoardResponse(BaseModel):
     cards: dict[str, CardData]
 
 
+class BoardSummary(BaseModel):
+    id: int
+    title: str
+    created_at: str
+    card_count: int = 0
+
+
 class RenameColumnRequest(BaseModel):
+    title: str = Field(min_length=1)
+
+
+class CreateColumnRequest(BaseModel):
     title: str = Field(min_length=1)
 
 
@@ -33,16 +52,30 @@ class CreateCardRequest(BaseModel):
     column_id: str
     title: str = Field(min_length=1)
     details: str = ""
+    due_date: str | None = None
+    priority: Literal["low", "medium", "high"] = "medium"
+    label: str | None = None
 
 
 class UpdateCardRequest(BaseModel):
     title: str | None = None
     details: str | None = None
+    due_date: str | None = None
+    priority: Literal["low", "medium", "high"] | None = None
+    label: str | None = None
 
 
 class MoveCardRequest(BaseModel):
     column_id: str
     position: int = Field(ge=0)
+
+
+class CreateBoardRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=100)
+
+
+class RenameBoardRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=100)
 
 
 class ChatMessage(BaseModel):
@@ -84,3 +117,13 @@ class BoardUpdate(BaseModel):
 class AIResponseBody(BaseModel):
     reply: str
     board: BoardResponse | None = None
+
+
+# --- Admin ---
+
+class UserSummary(BaseModel):
+    id: int
+    username: str
+    is_admin: bool
+    created_at: str
+    board_count: int = 0

@@ -1,6 +1,8 @@
 import { vi, type Mock } from "vitest";
 import { login, logout, checkAuth } from "./auth";
 
+const mockUser = { username: "user", is_admin: false };
+
 beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn());
 });
@@ -10,18 +12,19 @@ afterEach(() => {
 });
 
 describe("login", () => {
-  it("returns true on 200 response", async () => {
-    (fetch as Mock).mockResolvedValue({ ok: true });
-    expect(await login("user", "password")).toBe(true);
+  it("returns user object on 200 response", async () => {
+    (fetch as Mock).mockResolvedValue({ ok: true, json: async () => mockUser });
+    const result = await login("user", "password");
+    expect(result).toEqual(mockUser);
   });
 
-  it("returns false on non-200 response", async () => {
+  it("returns null on non-200 response", async () => {
     (fetch as Mock).mockResolvedValue({ ok: false });
-    expect(await login("user", "wrong")).toBe(false);
+    expect(await login("user", "wrong")).toBeNull();
   });
 
   it("posts credentials as JSON to /api/auth/login", async () => {
-    (fetch as Mock).mockResolvedValue({ ok: true });
+    (fetch as Mock).mockResolvedValue({ ok: true, json: async () => mockUser });
     await login("user", "password");
     expect(fetch).toHaveBeenCalledWith(
       expect.stringContaining("/api/auth/login"),
@@ -45,18 +48,19 @@ describe("logout", () => {
 });
 
 describe("checkAuth", () => {
-  it("returns true when /api/auth/me succeeds", async () => {
-    (fetch as Mock).mockResolvedValue({ ok: true });
-    expect(await checkAuth()).toBe(true);
+  it("returns user object when /api/auth/me succeeds", async () => {
+    (fetch as Mock).mockResolvedValue({ ok: true, json: async () => mockUser });
+    const result = await checkAuth();
+    expect(result).toEqual(mockUser);
   });
 
-  it("returns false when /api/auth/me fails", async () => {
+  it("returns null when /api/auth/me fails", async () => {
     (fetch as Mock).mockResolvedValue({ ok: false });
-    expect(await checkAuth()).toBe(false);
+    expect(await checkAuth()).toBeNull();
   });
 
   it("includes credentials in the request", async () => {
-    (fetch as Mock).mockResolvedValue({ ok: true });
+    (fetch as Mock).mockResolvedValue({ ok: true, json: async () => mockUser });
     await checkAuth();
     expect(fetch).toHaveBeenCalledWith(
       expect.stringContaining("/api/auth/me"),

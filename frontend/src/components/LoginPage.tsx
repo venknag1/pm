@@ -1,29 +1,45 @@
 "use client";
 
 import { useState } from "react";
-import { login } from "@/lib/auth";
+import { login, type AuthUser } from "@/lib/auth";
+import { register } from "@/lib/api";
 
 type LoginPageProps = {
-  onLogin: () => void;
+  onLogin: (user: AuthUser) => void;
 };
 
 export const LoginPage = ({ onLogin }: LoginPageProps) => {
+  const [mode, setMode] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
-    setError(false);
-    const ok = await login(username, password);
-    setSubmitting(false);
-    if (ok) {
-      onLogin();
-    } else {
-      setError(true);
+    setError(null);
+
+    try {
+      if (mode === "register") {
+        await register(username, password);
+      }
+      const user = await login(username, password);
+      if (user) {
+        onLogin(user);
+      } else {
+        setError("Incorrect username or password.");
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "An error occurred.");
+    } finally {
+      setSubmitting(false);
     }
+  };
+
+  const switchMode = () => {
+    setMode((m) => (m === "login" ? "register" : "login"));
+    setError(null);
   };
 
   return (
@@ -36,7 +52,7 @@ export const LoginPage = ({ onLogin }: LoginPageProps) => {
           <div className="mb-8">
             <div className="h-1 w-10 rounded-full bg-[var(--accent-yellow)]" />
             <h1 className="mt-4 font-display text-3xl font-semibold text-[var(--navy-dark)]">
-              Sign in
+              {mode === "login" ? "Sign in" : "Create account"}
             </h1>
             <p className="mt-2 text-sm text-[var(--gray-text)]">Kanban Studio</p>
           </div>
@@ -54,7 +70,7 @@ export const LoginPage = ({ onLogin }: LoginPageProps) => {
                 type="text"
                 autoComplete="username"
                 value={username}
-                onChange={(e) => { setUsername(e.target.value); setError(false); }}
+                onChange={(e) => { setUsername(e.target.value); setError(null); }}
                 className="rounded-xl border border-[var(--stroke)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--navy-dark)] outline-none transition focus:border-[var(--primary-blue)] focus:ring-2 focus:ring-[var(--primary-blue)]/20"
               />
             </div>
@@ -69,11 +85,14 @@ export const LoginPage = ({ onLogin }: LoginPageProps) => {
               <input
                 id="password"
                 type="password"
-                autoComplete="current-password"
+                autoComplete={mode === "register" ? "new-password" : "current-password"}
                 value={password}
-                onChange={(e) => { setPassword(e.target.value); setError(false); }}
+                onChange={(e) => { setPassword(e.target.value); setError(null); }}
                 className="rounded-xl border border-[var(--stroke)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--navy-dark)] outline-none transition focus:border-[var(--primary-blue)] focus:ring-2 focus:ring-[var(--primary-blue)]/20"
               />
+              {mode === "register" && (
+                <p className="text-xs text-[var(--gray-text)]">Minimum 6 characters</p>
+              )}
             </div>
 
             {error && (
@@ -81,7 +100,7 @@ export const LoginPage = ({ onLogin }: LoginPageProps) => {
                 role="alert"
                 className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600"
               >
-                Incorrect username or password.
+                {error}
               </p>
             )}
 
@@ -90,7 +109,19 @@ export const LoginPage = ({ onLogin }: LoginPageProps) => {
               disabled={submitting}
               className="mt-1 rounded-xl bg-[var(--secondary-purple)] px-6 py-3 text-sm font-semibold text-white transition hover:opacity-90 active:opacity-80 disabled:opacity-50"
             >
-              {submitting ? "Signing in..." : "Sign in"}
+              {submitting
+                ? mode === "login" ? "Signing in..." : "Creating account..."
+                : mode === "login" ? "Sign in" : "Create account"}
+            </button>
+
+            <button
+              type="button"
+              onClick={switchMode}
+              className="text-sm text-[var(--gray-text)] hover:text-[var(--primary-blue)] transition"
+            >
+              {mode === "login"
+                ? "No account? Create one"
+                : "Already have an account? Sign in"}
             </button>
           </form>
         </div>

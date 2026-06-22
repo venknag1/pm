@@ -6,28 +6,56 @@ import * as api from "@/lib/api";
 import { initialData } from "@/lib/kanban";
 
 vi.mock("@/lib/api", () => ({
-  getBoard: vi.fn(),
+  getBoardById: vi.fn(),
   renameColumn: vi.fn().mockResolvedValue(undefined),
+  createColumn: vi.fn().mockResolvedValue({ id: "col-new", title: "New Column" }),
+  deleteColumn: vi.fn().mockResolvedValue(undefined),
   createCard: vi.fn().mockResolvedValue("test-card-id"),
   deleteCard: vi.fn().mockResolvedValue(undefined),
   moveCard: vi.fn().mockResolvedValue(undefined),
   sendAIMessage: vi.fn().mockResolvedValue({ reply: "I can help!", board: null }),
 }));
 
-const renderBoard = () => render(<KanbanBoard onLogout={() => {}} />);
+const BOARD_ID = 1;
+const renderBoard = () =>
+  render(
+    <KanbanBoard
+      boardId={BOARD_ID}
+      boardTitle="Test Board"
+      onBack={() => {}}
+      onLogout={() => {}}
+    />
+  );
 
 beforeEach(() => {
-  (api.getBoard as Mock).mockResolvedValue({
+  (api.getBoardById as Mock).mockResolvedValue({
     columns: initialData.columns,
     cards: initialData.cards,
   });
 });
 
 describe("KanbanBoard", () => {
-
   it("renders five columns after loading", async () => {
     renderBoard();
     expect(await screen.findAllByTestId(/^column-/)).toHaveLength(5);
+  });
+
+  it("shows the board title in the header", async () => {
+    renderBoard();
+    await screen.findAllByTestId(/^column-/);
+    expect(screen.getByText("Test Board")).toBeInTheDocument();
+  });
+
+  it("shows a back button", async () => {
+    renderBoard();
+    await screen.findAllByTestId(/^column-/);
+    expect(screen.getByLabelText(/back to boards/i)).toBeInTheDocument();
+  });
+
+  it("shows an Add Column button", async () => {
+    renderBoard();
+    await screen.findAllByTestId(/^column-/);
+    expect(screen.getByRole("button", { name: /add column/i })).toBeInTheDocument();
   });
 
   it("renames a column", async () => {
@@ -57,6 +85,24 @@ describe("KanbanBoard", () => {
 
     await waitFor(() => {
       expect(within(column).queryByText("New card")).not.toBeInTheDocument();
+    });
+  });
+
+  it("shows add column form when Add Column is clicked", async () => {
+    renderBoard();
+    await screen.findAllByTestId(/^column-/);
+    await userEvent.click(screen.getByRole("button", { name: /add column/i }));
+    expect(screen.getByPlaceholderText(/column title/i)).toBeInTheDocument();
+  });
+
+  it("calls createColumn and adds column to board", async () => {
+    renderBoard();
+    await screen.findAllByTestId(/^column-/);
+    await userEvent.click(screen.getByRole("button", { name: /add column/i }));
+    await userEvent.type(screen.getByPlaceholderText(/column title/i), "Staging");
+    await userEvent.click(screen.getByRole("button", { name: /^add$/i }));
+    await waitFor(() => {
+      expect(api.createColumn).toHaveBeenCalledWith(BOARD_ID, "Staging");
     });
   });
 });
@@ -102,6 +148,17 @@ describe("AI sidebar", () => {
 
     expect(await screen.findByText("How is the board?")).toBeInTheDocument();
     expect(await screen.findByText("Board looks great!")).toBeInTheDocument();
+  });
+
+  it("passes boardId to sendAIMessage", async () => {
+    renderBoard();
+    await screen.findAllByTestId(/^column-/);
+    await userEvent.click(screen.getByRole("button", { name: /ai chat/i }));
+    await userEvent.type(screen.getByLabelText("AI message input"), "hello");
+    await userEvent.click(screen.getByRole("button", { name: /^send$/i }));
+    await waitFor(() => {
+      expect(api.sendAIMessage).toHaveBeenCalledWith("hello", [], BOARD_ID);
+    });
   });
 
   it("applies board update returned by AI", async () => {

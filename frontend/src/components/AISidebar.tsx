@@ -7,9 +7,10 @@ import type { BoardData } from "@/lib/kanban";
 type AISidebarProps = {
   onClose: () => void;
   onBoardUpdate: (board: BoardData) => void;
+  boardId?: number;
 };
 
-export const AISidebar = ({ onClose, onBoardUpdate }: AISidebarProps) => {
+export const AISidebar = ({ onClose, onBoardUpdate, boardId }: AISidebarProps) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -30,7 +31,7 @@ export const AISidebar = ({ onClose, onBoardUpdate }: AISidebarProps) => {
     setLoading(true);
 
     try {
-      const result = await sendAIMessage(text, messages);
+      const result = await sendAIMessage(text, messages, boardId);
       setMessages((prev) => [...prev, { role: "assistant", content: result.reply }]);
       if (result.board) {
         onBoardUpdate(result.board);

@@ -1,7 +1,7 @@
 import os
 
 import bcrypt
-from fastapi import Cookie, HTTPException
+from fastapi import Cookie, Depends, HTTPException
 from itsdangerous import BadSignature, URLSafeSerializer
 
 _signer = URLSafeSerializer(

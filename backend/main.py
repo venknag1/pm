@@ -12,20 +12,26 @@ from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI
 from pydantic import ValidationError
 
-from .auth import create_session_token, get_current_user_id, verify_password
+from .auth import create_session_token, get_current_user_id, hash_password, verify_password
 from .db import get_db, init_db
 from .models import (
     AIRequest,
     AIResponseBody,
     BoardResponse,
+    BoardSummary,
     BoardUpdate,
     CardData,
     ColumnData,
+    CreateBoardRequest,
     CreateCardRequest,
+    CreateColumnRequest,
     LoginRequest,
     MoveCardRequest,
+    RegisterRequest,
+    RenameBoardRequest,
     RenameColumnRequest,
     UpdateCardRequest,
+    UserSummary,
 )
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
@@ -83,28 +89,46 @@ def _new_id(prefix: str) -> str:
 
 
 def _get_board(db, user_id: int):
-    board = db.execute("SELECT * FROM boards WHERE user_id = ?", (user_id,)).fetchone()
+    """Get the user's first/primary board (backward compat)."""
+    board = db.execute(
+        "SELECT * FROM boards WHERE user_id = ? ORDER BY id LIMIT 1", (user_id,)
+    ).fetchone()
     if not board:
         raise HTTPException(status_code=404, detail="Board not found")
     return board
 
 
-def _build_board_response(db, user_id: int) -> BoardResponse:
-    board = _get_board(db, user_id)
+def _get_board_by_id(db, board_id: int, user_id: int):
+    """Get a specific board and verify it belongs to the user."""
+    board = db.execute(
+        "SELECT * FROM boards WHERE id = ? AND user_id = ?", (board_id, user_id)
+    ).fetchone()
+    if not board:
+        raise HTTPException(status_code=404, detail="Board not found")
+    return board
+
+
+def _build_board_response(db, board_id: int) -> BoardResponse:
     cols = db.execute(
         "SELECT id, title FROM columns WHERE board_id = ? ORDER BY position",
-        (board["id"],),
+        (board_id,),
     ).fetchall()
     all_cards = db.execute(
-        "SELECT id, column_id, title, details FROM cards WHERE board_id = ? ORDER BY position",
-        (board["id"],),
+        "SELECT id, column_id, title, details, due_date, priority, label"
+        " FROM cards WHERE board_id = ? ORDER BY position",
+        (board_id,),
     ).fetchall()
     card_ids_by_col: dict[str, list[str]] = {col["id"]: [] for col in cols}
     cards_map: dict[str, CardData] = {}
     for card in all_cards:
         card_ids_by_col[card["column_id"]].append(card["id"])
         cards_map[card["id"]] = CardData(
-            id=card["id"], title=card["title"], details=card["details"]
+            id=card["id"],
+            title=card["title"],
+            details=card["details"],
+            due_date=card["due_date"],
+            priority=card["priority"] or "medium",
+            label=card["label"],
         )
     return BoardResponse(
         columns=[
@@ -115,16 +139,14 @@ def _build_board_response(db, user_id: int) -> BoardResponse:
     )
 
 
-def _board_for_prompt(db, user_id: int) -> dict:
-    """Return a simplified board dict suitable for the AI system prompt."""
-    board = _get_board(db, user_id)
+def _board_for_prompt(db, board_id: int) -> dict:
     cols = db.execute(
         "SELECT id, title FROM columns WHERE board_id = ? ORDER BY position",
-        (board["id"],),
+        (board_id,),
     ).fetchall()
     all_cards = db.execute(
         "SELECT id, column_id, title, details FROM cards WHERE board_id = ? ORDER BY position",
-        (board["id"],),
+        (board_id,),
     ).fetchall()
     cards_by_col: dict[str, list[dict]] = {col["id"]: [] for col in cols}
     for card in all_cards:
@@ -141,8 +163,7 @@ def _board_for_prompt(db, user_id: int) -> dict:
     }
 
 
-def _apply_board_update(db, board_id: str, update: BoardUpdate) -> bool:
-    """Apply AI-generated board mutations. Returns True if any changes were made."""
+def _apply_board_update(db, board_id: int, update: BoardUpdate) -> bool:
     valid_cols = {
         row["id"]
         for row in db.execute(
@@ -245,12 +266,24 @@ def _apply_board_update(db, board_id: str, update: BoardUpdate) -> bool:
     return changed
 
 
-# --- Auth ---
+def _require_admin(user_id: int, db) -> None:
+    user = db.execute("SELECT is_admin FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user or not user["is_admin"]:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+
+# ---------------------------------------------------------------------------
+# Health
+# ---------------------------------------------------------------------------
 
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
 
+
+# ---------------------------------------------------------------------------
+# Auth
+# ---------------------------------------------------------------------------
 
 @app.post("/api/auth/login")
 def login(req: LoginRequest, response: Response, db=Depends(get_db)):
@@ -265,7 +298,7 @@ def login(req: LoginRequest, response: Response, db=Depends(get_db)):
         httponly=True,
         samesite="lax",
     )
-    return {"username": user["username"]}
+    return {"username": user["username"], "is_admin": bool(user["is_admin"])}
 
 
 @app.post("/api/auth/logout")
@@ -276,20 +309,207 @@ def logout(response: Response):
 
 @app.get("/api/auth/me")
 def me(user_id: int = Depends(get_current_user_id), db=Depends(get_db)):
-    user = db.execute("SELECT username FROM users WHERE id = ?", (user_id,)).fetchone()
+    user = db.execute(
+        "SELECT username, is_admin FROM users WHERE id = ?", (user_id,)
+    ).fetchone()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return {"username": user["username"]}
+    return {"username": user["username"], "is_admin": bool(user["is_admin"])}
 
 
-# --- Board ---
+@app.post("/api/auth/register", status_code=201)
+def register(req: RegisterRequest, db=Depends(get_db)):
+    existing = db.execute(
+        "SELECT 1 FROM users WHERE username = ?", (req.username,)
+    ).fetchone()
+    if existing:
+        raise HTTPException(status_code=409, detail="Username already taken")
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+
+    from .db import DEFAULT_COLUMNS
+    with db:
+        db.execute(
+            "INSERT INTO users (username, password_hash, is_admin, created_at) VALUES (?, ?, ?, ?)",
+            (req.username, hash_password(req.password), 0, now),
+        )
+        user_id = db.execute(
+            "SELECT id FROM users WHERE username = ?", (req.username,)
+        ).fetchone()["id"]
+        db.execute(
+            "INSERT INTO boards (user_id, title, created_at) VALUES (?, ?, ?)",
+            (user_id, "My Board", now),
+        )
+        board_id = db.execute(
+            "SELECT id FROM boards WHERE user_id = ? ORDER BY id DESC LIMIT 1", (user_id,)
+        ).fetchone()["id"]
+        for col_id, title, position in DEFAULT_COLUMNS:
+            new_col_id = _new_id("col")
+            db.execute(
+                "INSERT INTO columns (id, board_id, title, position) VALUES (?, ?, ?, ?)",
+                (new_col_id, board_id, title, position),
+            )
+
+    return {"username": req.username}
+
+
+# ---------------------------------------------------------------------------
+# Boards
+# ---------------------------------------------------------------------------
+
+@app.get("/api/boards", response_model=list[BoardSummary])
+def list_boards(user_id: int = Depends(get_current_user_id), db=Depends(get_db)):
+    boards = db.execute(
+        "SELECT id, title, created_at FROM boards WHERE user_id = ? ORDER BY id",
+        (user_id,),
+    ).fetchall()
+    result = []
+    for board in boards:
+        card_count = db.execute(
+            "SELECT COUNT(*) FROM cards WHERE board_id = ?", (board["id"],)
+        ).fetchone()[0]
+        result.append(BoardSummary(
+            id=board["id"],
+            title=board["title"],
+            created_at=board["created_at"],
+            card_count=card_count,
+        ))
+    return result
+
+
+@app.post("/api/boards", status_code=201)
+def create_board(
+    req: CreateBoardRequest,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    from datetime import datetime, timezone
+    from .db import DEFAULT_COLUMNS
+    now = datetime.now(timezone.utc).isoformat()
+    with db:
+        db.execute(
+            "INSERT INTO boards (user_id, title, created_at) VALUES (?, ?, ?)",
+            (user_id, req.title, now),
+        )
+        board_id = db.execute(
+            "SELECT id FROM boards WHERE user_id = ? ORDER BY id DESC LIMIT 1", (user_id,)
+        ).fetchone()["id"]
+        for _, title, position in DEFAULT_COLUMNS:
+            col_id = _new_id("col")
+            db.execute(
+                "INSERT INTO columns (id, board_id, title, position) VALUES (?, ?, ?, ?)",
+                (col_id, board_id, title, position),
+            )
+    return {"id": board_id, "title": req.title}
+
+
+@app.get("/api/boards/{board_id}", response_model=BoardResponse)
+def get_board_by_id(
+    board_id: int,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    board = _get_board_by_id(db, board_id, user_id)
+    return _build_board_response(db, board["id"])
+
+
+@app.patch("/api/boards/{board_id}")
+def rename_board(
+    board_id: int,
+    req: RenameBoardRequest,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    _get_board_by_id(db, board_id, user_id)
+    with db:
+        db.execute("UPDATE boards SET title = ? WHERE id = ?", (req.title, board_id))
+    return {"ok": True}
+
+
+@app.delete("/api/boards/{board_id}")
+def delete_board(
+    board_id: int,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    _get_board_by_id(db, board_id, user_id)
+    # Verify user has more than one board before deleting
+    board_count = db.execute(
+        "SELECT COUNT(*) FROM boards WHERE user_id = ?", (user_id,)
+    ).fetchone()[0]
+    if board_count <= 1:
+        raise HTTPException(status_code=400, detail="Cannot delete your only board")
+    with db:
+        db.execute("DELETE FROM boards WHERE id = ?", (board_id,))
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Columns (board-specific)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/boards/{board_id}/columns", status_code=201)
+def create_column(
+    board_id: int,
+    req: CreateColumnRequest,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    _get_board_by_id(db, board_id, user_id)
+    max_pos = db.execute(
+        "SELECT COALESCE(MAX(position), -1) FROM columns WHERE board_id = ?",
+        (board_id,),
+    ).fetchone()[0]
+    col_id = _new_id("col")
+    with db:
+        db.execute(
+            "INSERT INTO columns (id, board_id, title, position) VALUES (?, ?, ?, ?)",
+            (col_id, board_id, req.title, max_pos + 1),
+        )
+    return {"id": col_id, "title": req.title}
+
+
+@app.delete("/api/boards/{board_id}/columns/{column_id}")
+def delete_column(
+    board_id: int,
+    column_id: str,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    _get_board_by_id(db, board_id, user_id)
+    col = db.execute(
+        "SELECT position FROM columns WHERE id = ? AND board_id = ?", (column_id, board_id)
+    ).fetchone()
+    if not col:
+        raise HTTPException(status_code=404, detail="Column not found")
+    col_count = db.execute(
+        "SELECT COUNT(*) FROM columns WHERE board_id = ?", (board_id,)
+    ).fetchone()[0]
+    if col_count <= 1:
+        raise HTTPException(status_code=400, detail="Cannot delete the only column")
+    with db:
+        db.execute("DELETE FROM columns WHERE id = ?", (column_id,))
+        db.execute(
+            "UPDATE columns SET position = position - 1 WHERE board_id = ? AND position > ?",
+            (board_id, col["position"]),
+        )
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Board (legacy single-board endpoint — keeps old API working)
+# ---------------------------------------------------------------------------
 
 @app.get("/api/board", response_model=BoardResponse)
 def get_board(user_id: int = Depends(get_current_user_id), db=Depends(get_db)):
-    return _build_board_response(db, user_id)
+    board = _get_board(db, user_id)
+    return _build_board_response(db, board["id"])
 
 
-# --- Columns ---
+# ---------------------------------------------------------------------------
+# Columns (legacy route)
+# ---------------------------------------------------------------------------
 
 @app.patch("/api/columns/{column_id}")
 def rename_column(
@@ -308,7 +528,9 @@ def rename_column(
     return {"ok": True}
 
 
-# --- Cards ---
+# ---------------------------------------------------------------------------
+# Cards
+# ---------------------------------------------------------------------------
 
 @app.post("/api/cards", status_code=201)
 def create_card(
@@ -330,9 +552,43 @@ def create_card(
     card_id = _new_id("card")
     with db:
         db.execute(
-            "INSERT INTO cards (id, board_id, column_id, title, details, position)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
-            (card_id, board["id"], req.column_id, req.title, req.details, max_pos + 1),
+            "INSERT INTO cards (id, board_id, column_id, title, details, position,"
+            " due_date, priority, label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                card_id, board["id"], req.column_id, req.title, req.details,
+                max_pos + 1, req.due_date, req.priority, req.label,
+            ),
+        )
+    return {"id": card_id}
+
+
+@app.post("/api/boards/{board_id}/cards", status_code=201)
+def create_card_on_board(
+    board_id: int,
+    req: CreateCardRequest,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    board = _get_board_by_id(db, board_id, user_id)
+    if not db.execute(
+        "SELECT 1 FROM columns WHERE id = ? AND board_id = ?", (req.column_id, board["id"])
+    ).fetchone():
+        raise HTTPException(status_code=404, detail="Column not found")
+
+    max_pos = db.execute(
+        "SELECT COALESCE(MAX(position), -1) FROM cards WHERE column_id = ?",
+        (req.column_id,),
+    ).fetchone()[0]
+
+    card_id = _new_id("card")
+    with db:
+        db.execute(
+            "INSERT INTO cards (id, board_id, column_id, title, details, position,"
+            " due_date, priority, label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                card_id, board["id"], req.column_id, req.title, req.details,
+                max_pos + 1, req.due_date, req.priority, req.label,
+            ),
         )
     return {"id": card_id}
 
@@ -344,19 +600,24 @@ def update_card(
     user_id: int = Depends(get_current_user_id),
     db=Depends(get_db),
 ):
-    board = _get_board(db, user_id)
+    # Find the board this card belongs to (verify user owns it)
     card = db.execute(
-        "SELECT id, title, details FROM cards WHERE id = ? AND board_id = ?",
-        (card_id, board["id"]),
+        "SELECT c.id, c.title, c.details, c.due_date, c.priority, c.label, b.user_id"
+        " FROM cards c JOIN boards b ON c.board_id = b.id WHERE c.id = ?",
+        (card_id,),
     ).fetchone()
-    if not card:
+    if not card or card["user_id"] != user_id:
         raise HTTPException(status_code=404, detail="Card not found")
     with db:
         db.execute(
-            "UPDATE cards SET title = ?, details = ? WHERE id = ?",
+            "UPDATE cards SET title = ?, details = ?, due_date = ?, priority = ?, label = ?"
+            " WHERE id = ?",
             (
                 req.title if req.title is not None else card["title"],
                 req.details if req.details is not None else card["details"],
+                req.due_date if req.due_date is not None else card["due_date"],
+                req.priority if req.priority is not None else card["priority"],
+                req.label if req.label is not None else card["label"],
                 card_id,
             ),
         )
@@ -369,12 +630,12 @@ def delete_card(
     user_id: int = Depends(get_current_user_id),
     db=Depends(get_db),
 ):
-    board = _get_board(db, user_id)
     card = db.execute(
-        "SELECT column_id, position FROM cards WHERE id = ? AND board_id = ?",
-        (card_id, board["id"]),
+        "SELECT c.column_id, c.position, b.user_id"
+        " FROM cards c JOIN boards b ON c.board_id = b.id WHERE c.id = ?",
+        (card_id,),
     ).fetchone()
-    if not card:
+    if not card or card["user_id"] != user_id:
         raise HTTPException(status_code=404, detail="Card not found")
     with db:
         db.execute("DELETE FROM cards WHERE id = ?", (card_id,))
@@ -393,15 +654,16 @@ def move_card(
     user_id: int = Depends(get_current_user_id),
     db=Depends(get_db),
 ):
-    board = _get_board(db, user_id)
     card = db.execute(
-        "SELECT column_id, position FROM cards WHERE id = ? AND board_id = ?",
-        (card_id, board["id"]),
+        "SELECT c.column_id, c.position, c.board_id, b.user_id"
+        " FROM cards c JOIN boards b ON c.board_id = b.id WHERE c.id = ?",
+        (card_id,),
     ).fetchone()
-    if not card:
+    if not card or card["user_id"] != user_id:
         raise HTTPException(status_code=404, detail="Card not found")
     if not db.execute(
-        "SELECT 1 FROM columns WHERE id = ? AND board_id = ?", (req.column_id, board["id"])
+        "SELECT 1 FROM columns WHERE id = ? AND board_id = ?",
+        (req.column_id, card["board_id"]),
     ).fetchone():
         raise HTTPException(status_code=404, detail="Column not found")
 
@@ -445,20 +707,16 @@ def move_card(
     return {"ok": True}
 
 
-# --- AI ---
+# ---------------------------------------------------------------------------
+# AI
+# ---------------------------------------------------------------------------
 
-@app.post("/api/ai", response_model=AIResponseBody)
-async def ai_chat(
-    req: AIRequest,
-    user_id: int = Depends(get_current_user_id),
-    db=Depends(get_db),
-):
+async def _run_ai(board_id: int, req: AIRequest, db) -> AIResponseBody:
     api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
         raise HTTPException(status_code=503, detail="AI service not configured")
 
-    board = _get_board(db, user_id)
-    board_json = json.dumps(_board_for_prompt(db, user_id), indent=2)
+    board_json = json.dumps(_board_for_prompt(db, board_id), indent=2)
     system_content = _AI_SYSTEM_PROMPT.format(board_json=board_json)
 
     messages: list[dict] = [{"role": "system", "content": system_content}]
@@ -478,13 +736,11 @@ async def ai_chat(
     raw = completion.choices[0].message.content or ""
     print(f"[AI raw] {raw[:800]}", flush=True)
 
-    # Strip markdown code fences
     stripped = raw.strip()
     if stripped.startswith("```"):
         stripped = stripped.split("\n", 1)[-1]
         stripped = stripped.rsplit("```", 1)[0].strip()
 
-    # If the model prefixed preamble text, find the outermost JSON object
     if not stripped.startswith("{"):
         start = stripped.find("{")
         end = stripped.rfind("}") + 1
@@ -505,10 +761,91 @@ async def ai_chat(
             update = BoardUpdate(**raw_update)
         except (ValidationError, TypeError):
             update = BoardUpdate()
-        if _apply_board_update(db, board["id"], update):
-            updated_board = _build_board_response(db, user_id)
+        if _apply_board_update(db, board_id, update):
+            updated_board = _build_board_response(db, board_id)
 
     return AIResponseBody(reply=reply, board=updated_board)
+
+
+@app.post("/api/ai", response_model=AIResponseBody)
+async def ai_chat(
+    req: AIRequest,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    board = _get_board(db, user_id)
+    return await _run_ai(board["id"], req, db)
+
+
+@app.post("/api/boards/{board_id}/ai", response_model=AIResponseBody)
+async def ai_chat_for_board(
+    board_id: int,
+    req: AIRequest,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    board = _get_board_by_id(db, board_id, user_id)
+    return await _run_ai(board["id"], req, db)
+
+
+# ---------------------------------------------------------------------------
+# Admin
+# ---------------------------------------------------------------------------
+
+@app.get("/api/admin/users", response_model=list[UserSummary])
+def admin_list_users(
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    _require_admin(user_id, db)
+    users = db.execute(
+        "SELECT id, username, is_admin, created_at FROM users ORDER BY id"
+    ).fetchall()
+    result = []
+    for user in users:
+        board_count = db.execute(
+            "SELECT COUNT(*) FROM boards WHERE user_id = ?", (user["id"],)
+        ).fetchone()[0]
+        result.append(UserSummary(
+            id=user["id"],
+            username=user["username"],
+            is_admin=bool(user["is_admin"]),
+            created_at=user["created_at"],
+            board_count=board_count,
+        ))
+    return result
+
+
+@app.delete("/api/admin/users/{target_user_id}")
+def admin_delete_user(
+    target_user_id: int,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    _require_admin(user_id, db)
+    if target_user_id == user_id:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+    target = db.execute("SELECT id FROM users WHERE id = ?", (target_user_id,)).fetchone()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    with db:
+        db.execute("DELETE FROM users WHERE id = ?", (target_user_id,))
+    return {"ok": True}
+
+
+@app.patch("/api/admin/users/{target_user_id}/promote")
+def admin_promote_user(
+    target_user_id: int,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    _require_admin(user_id, db)
+    target = db.execute("SELECT id FROM users WHERE id = ?", (target_user_id,)).fetchone()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    with db:
+        db.execute("UPDATE users SET is_admin = 1 WHERE id = ?", (target_user_id,))
+    return {"ok": True}
 
 
 public_dir = Path(__file__).resolve().parent / "public"

@@ -9,16 +9,23 @@ async function post(path: string, body?: object): Promise<Response> {
   });
 }
 
-export async function login(username: string, password: string): Promise<boolean> {
+export type AuthUser = {
+  username: string;
+  is_admin: boolean;
+};
+
+export async function login(username: string, password: string): Promise<AuthUser | null> {
   const resp = await post("/api/auth/login", { username, password });
-  return resp.ok;
+  if (!resp.ok) return null;
+  return resp.json();
 }
 
 export async function logout(): Promise<void> {
   await post("/api/auth/logout");
 }
 
-export async function checkAuth(): Promise<boolean> {
+export async function checkAuth(): Promise<AuthUser | null> {
   const resp = await fetch(`${API_BASE}/api/auth/me`, { credentials: "include" });
-  return resp.ok;
+  if (!resp.ok) return null;
+  return resp.json();
 }

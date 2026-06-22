@@ -3,6 +3,24 @@ import { CSS } from "@dnd-kit/utilities";
 import clsx from "clsx";
 import type { Card } from "@/lib/kanban";
 
+const PRIORITY_COLORS = {
+  high: "bg-red-100 text-red-600",
+  medium: "bg-amber-100 text-amber-600",
+  low: "bg-emerald-100 text-emerald-600",
+};
+
+const LABEL_COLORS: Record<string, string> = {
+  bug: "bg-red-100 text-red-700",
+  feature: "bg-blue-100 text-blue-700",
+  chore: "bg-gray-100 text-gray-600",
+  design: "bg-purple-100 text-purple-700",
+  docs: "bg-yellow-100 text-yellow-700",
+};
+
+function labelColor(label: string): string {
+  return LABEL_COLORS[label.toLowerCase()] ?? "bg-gray-100 text-gray-600";
+}
+
 type KanbanCardProps = {
   card: Card;
   onDelete: (cardId: string) => void;
@@ -16,6 +34,9 @@ export const KanbanCard = ({ card, onDelete }: KanbanCardProps) => {
     transform: CSS.Transform.toString(transform),
     transition,
   };
+
+  const isOverdue =
+    card.due_date && new Date(card.due_date) < new Date(new Date().toDateString());
 
   return (
     <article
@@ -41,12 +62,32 @@ export const KanbanCard = ({ card, onDelete }: KanbanCardProps) => {
           <path d="M1 1l8 8M9 1L1 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
         </svg>
       </button>
+
+      <div className="mb-1 flex flex-wrap gap-1.5 pr-5">
+        {card.priority && card.priority !== "medium" && (
+          <span className={clsx("rounded-full px-2 py-0.5 text-[10px] font-semibold", PRIORITY_COLORS[card.priority])}>
+            {card.priority}
+          </span>
+        )}
+        {card.label && (
+          <span className={clsx("rounded-full px-2 py-0.5 text-[10px] font-semibold", labelColor(card.label))}>
+            {card.label}
+          </span>
+        )}
+      </div>
+
       <h4 className="font-display text-sm font-semibold leading-5 text-[var(--navy-dark)] pr-4">
         {card.title}
       </h4>
       {card.details && (
         <p className="mt-1.5 text-xs leading-5 text-[var(--gray-text)]">
           {card.details}
+        </p>
+      )}
+      {card.due_date && (
+        <p className={clsx("mt-2 text-[10px] font-semibold", isOverdue ? "text-red-500" : "text-[var(--gray-text)]")}>
+          Due {new Date(card.due_date).toLocaleDateString()}
+          {isOverdue && " (overdue)"}
         </p>
       )}
     </article>

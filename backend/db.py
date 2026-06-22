@@ -30,6 +30,45 @@ def get_db():
         conn.close()
 
 
+def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return any(row["name"] == column for row in rows)
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Apply schema migrations for new columns and structural changes."""
+    # Add is_admin to users if missing
+    if not _has_column(conn, "users", "is_admin"):
+        conn.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0")
+
+    # Add title to boards and remove UNIQUE constraint on user_id.
+    # SQLite can't DROP CONSTRAINT directly — recreate the table if needed.
+    if not _has_column(conn, "boards", "title"):
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS boards_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                title TEXT NOT NULL DEFAULT 'My Board',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+            INSERT INTO boards_new (id, user_id, title, created_at)
+                SELECT id, user_id, 'My Board', created_at FROM boards;
+            DROP TABLE boards;
+            ALTER TABLE boards_new RENAME TO boards;
+        """)
+
+    # Add due_date, priority, label to cards if missing
+    if not _has_column(conn, "cards", "due_date"):
+        conn.execute("ALTER TABLE cards ADD COLUMN due_date TEXT")
+    if not _has_column(conn, "cards", "priority"):
+        conn.execute("ALTER TABLE cards ADD COLUMN priority TEXT NOT NULL DEFAULT 'medium'")
+    if not _has_column(conn, "cards", "label"):
+        conn.execute("ALTER TABLE cards ADD COLUMN label TEXT")
+
+    conn.commit()
+
+
 def init_db() -> None:
     from .auth import hash_password
 
@@ -40,20 +79,22 @@ def init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
+                is_admin INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS boards (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER UNIQUE NOT NULL,
+                user_id INTEGER NOT NULL,
+                title TEXT NOT NULL DEFAULT 'My Board',
                 created_at TEXT NOT NULL,
-                FOREIGN KEY (user_id) REFERENCES users(id)
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
             CREATE TABLE IF NOT EXISTS columns (
                 id TEXT PRIMARY KEY,
                 board_id INTEGER NOT NULL,
                 title TEXT NOT NULL,
                 position INTEGER NOT NULL,
-                FOREIGN KEY (board_id) REFERENCES boards(id)
+                FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE
             );
             CREATE TABLE IF NOT EXISTS cards (
                 id TEXT PRIMARY KEY,
@@ -62,34 +103,61 @@ def init_db() -> None:
                 title TEXT NOT NULL,
                 details TEXT NOT NULL DEFAULT '',
                 position INTEGER NOT NULL,
-                FOREIGN KEY (board_id) REFERENCES boards(id),
-                FOREIGN KEY (column_id) REFERENCES columns(id)
+                due_date TEXT,
+                priority TEXT NOT NULL DEFAULT 'medium',
+                label TEXT,
+                FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE,
+                FOREIGN KEY (column_id) REFERENCES columns(id) ON DELETE CASCADE
             );
         """)
 
-        if conn.execute("SELECT 1 FROM users WHERE username = 'user'").fetchone():
-            return
+        _migrate(conn)
 
+        # Create default admin user and default user if they don't exist
         now = datetime.now(timezone.utc).isoformat()
-        with conn:
-            conn.execute(
-                "INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)",
-                ("user", hash_password("password"), now),
-            )
-            user_id = conn.execute(
-                "SELECT id FROM users WHERE username = 'user'"
-            ).fetchone()["id"]
-            conn.execute(
-                "INSERT INTO boards (user_id, created_at) VALUES (?, ?)",
-                (user_id, now),
-            )
-            board_id = conn.execute(
-                "SELECT id FROM boards WHERE user_id = ?", (user_id,)
-            ).fetchone()["id"]
-            for col_id, title, position in DEFAULT_COLUMNS:
+
+        if not conn.execute("SELECT 1 FROM users WHERE username = 'admin'").fetchone():
+            with conn:
                 conn.execute(
-                    "INSERT INTO columns (id, board_id, title, position) VALUES (?, ?, ?, ?)",
-                    (col_id, board_id, title, position),
+                    "INSERT INTO users (username, password_hash, is_admin, created_at) VALUES (?, ?, ?, ?)",
+                    ("admin", hash_password("admin123"), 1, now),
                 )
+                admin_id = conn.execute(
+                    "SELECT id FROM users WHERE username = 'admin'"
+                ).fetchone()["id"]
+                conn.execute(
+                    "INSERT INTO boards (user_id, title, created_at) VALUES (?, ?, ?)",
+                    (admin_id, "Admin Board", now),
+                )
+                board_id = conn.execute(
+                    "SELECT id FROM boards WHERE user_id = ? ORDER BY id DESC LIMIT 1", (admin_id,)
+                ).fetchone()["id"]
+                for col_id, title, position in DEFAULT_COLUMNS:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO columns (id, board_id, title, position) VALUES (?, ?, ?, ?)",
+                        (f"admin-{col_id}", board_id, title, position),
+                    )
+
+        if not conn.execute("SELECT 1 FROM users WHERE username = 'user'").fetchone():
+            with conn:
+                conn.execute(
+                    "INSERT INTO users (username, password_hash, is_admin, created_at) VALUES (?, ?, ?, ?)",
+                    ("user", hash_password("password"), 0, now),
+                )
+                user_id = conn.execute(
+                    "SELECT id FROM users WHERE username = 'user'"
+                ).fetchone()["id"]
+                conn.execute(
+                    "INSERT INTO boards (user_id, title, created_at) VALUES (?, ?, ?)",
+                    (user_id, "My Board", now),
+                )
+                board_id = conn.execute(
+                    "SELECT id FROM boards WHERE user_id = ? ORDER BY id DESC LIMIT 1", (user_id,)
+                ).fetchone()["id"]
+                for col_id, title, position in DEFAULT_COLUMNS:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO columns (id, board_id, title, position) VALUES (?, ?, ?, ?)",
+                        (col_id, board_id, title, position),
+                    )
     finally:
         conn.close()
