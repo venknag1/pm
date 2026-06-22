@@ -13,6 +13,15 @@ class RegisterRequest(BaseModel):
     password: str = Field(min_length=6)
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=6)
+
+
+class ReorderColumnsRequest(BaseModel):
+    column_ids: list[str]
+
+
 class CardData(BaseModel):
     id: str
     title: str

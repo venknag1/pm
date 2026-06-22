@@ -121,6 +121,13 @@ export async function createColumn(boardId: number, title: string): Promise<{ id
   return resp.json();
 }
 
+export async function reorderColumns(boardId: number, columnIds: string[]): Promise<void> {
+  await request(`/api/boards/${boardId}/columns/reorder`, {
+    method: "PATCH",
+    body: JSON.stringify({ column_ids: columnIds }),
+  });
+}
+
 export async function deleteColumn(boardId: number, columnId: string): Promise<void> {
   const resp = await request(`/api/boards/${boardId}/columns/${columnId}`, {
     method: "DELETE",
@@ -197,6 +204,19 @@ export async function sendAIMessage(
     throw new Error(body?.detail ?? "AI request failed");
   }
   return resp.json();
+}
+
+// --- Account ---
+
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  const resp = await request("/api/auth/password", {
+    method: "PATCH",
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    throw new Error(body?.detail ?? "Failed to change password");
+  }
 }
 
 // --- Admin ---

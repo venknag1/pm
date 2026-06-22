@@ -870,6 +870,141 @@ class TestAI:
             resp = auth_client.post("/api/boards/99999/ai", json={"message": "hello"})
         assert resp.status_code == 404
 
+    def test_ai_system_prompt_includes_card_metadata(self, auth_client, monkeypatch):
+        """Priority, due_date, and label appear in the system prompt when set on cards."""
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+        auth_client.post(
+            "/api/cards",
+            json={
+                "column_id": "col-backlog",
+                "title": "Meta card",
+                "priority": "high",
+                "due_date": "2027-06-15",
+                "label": "bug",
+            },
+        )
+        with _mock_openai() as mock_cls:
+            auth_client.post("/api/ai", json={"message": "hi"})
+        messages = mock_cls.return_value.chat.completions.create.call_args.kwargs["messages"]
+        system_content = next(m["content"] for m in messages if m["role"] == "system")
+        assert "high" in system_content
+        assert "2027-06-15" in system_content
+        assert "bug" in system_content
+
+    def test_ai_creates_card_with_priority(self, auth_client, monkeypatch):
+        """AI can create a card with priority set via board_update."""
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+        update = {
+            "create_cards": [{
+                "column_id": "col-backlog",
+                "title": "High-pri card",
+                "details": "",
+                "priority": "high",
+            }]
+        }
+        with _mock_openai("Created a high-priority card.", board_update=update):
+            resp = auth_client.post("/api/ai", json={"message": "add a high priority card"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["board"] is not None
+        backlog = next(c for c in body["board"]["columns"] if c["id"] == "col-backlog")
+        cards = body["board"]["cards"]
+        high_pri = [cards[cid] for cid in backlog["cardIds"] if cards[cid]["title"] == "High-pri card"]
+        assert len(high_pri) == 1
+
+
+class TestPasswordChange:
+    def test_change_password_success(self, auth_client, client):
+        resp = auth_client.patch(
+            "/api/auth/password",
+            json={"current_password": "password", "new_password": "newpassword123"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+
+    def test_change_password_and_login_with_new(self, auth_client, client):
+        auth_client.patch(
+            "/api/auth/password",
+            json={"current_password": "password", "new_password": "newpassword123"},
+        )
+        auth_client.post("/api/auth/logout")
+        resp = client.post("/api/auth/login", json={"username": "user", "password": "newpassword123"})
+        assert resp.status_code == 200
+
+    def test_change_password_wrong_current(self, auth_client):
+        resp = auth_client.patch(
+            "/api/auth/password",
+            json={"current_password": "wrongpass", "new_password": "newpassword123"},
+        )
+        assert resp.status_code == 401
+
+    def test_change_password_short_new_rejected(self, auth_client):
+        resp = auth_client.patch(
+            "/api/auth/password",
+            json={"current_password": "password", "new_password": "abc"},
+        )
+        assert resp.status_code == 422
+
+    def test_change_password_unauthenticated(self, client):
+        resp = client.patch(
+            "/api/auth/password",
+            json={"current_password": "password", "new_password": "newpassword123"},
+        )
+        assert resp.status_code == 401
+
+
+class TestColumnReorder:
+    def test_reorder_columns(self, auth_client):
+        boards = auth_client.get("/api/boards").json()
+        board_id = boards[0]["id"]
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        col_ids = [c["id"] for c in board["columns"]]
+        # Reverse column order
+        reversed_ids = list(reversed(col_ids))
+        resp = auth_client.patch(
+            f"/api/boards/{board_id}/columns/reorder",
+            json={"column_ids": reversed_ids},
+        )
+        assert resp.status_code == 200
+        board_after = auth_client.get(f"/api/boards/{board_id}").json()
+        after_ids = [c["id"] for c in board_after["columns"]]
+        assert after_ids == reversed_ids
+
+    def test_reorder_columns_partial(self, auth_client):
+        boards = auth_client.get("/api/boards").json()
+        board_id = boards[0]["id"]
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        col_ids = [c["id"] for c in board["columns"]]
+        # Swap first two columns
+        reordered = [col_ids[1], col_ids[0]] + col_ids[2:]
+        auth_client.patch(
+            f"/api/boards/{board_id}/columns/reorder",
+            json={"column_ids": reordered},
+        )
+        board_after = auth_client.get(f"/api/boards/{board_id}").json()
+        after_ids = [c["id"] for c in board_after["columns"]]
+        assert after_ids[0] == col_ids[1]
+        assert after_ids[1] == col_ids[0]
+
+    def test_reorder_columns_unauthenticated(self, client):
+        resp = client.patch(
+            "/api/boards/1/columns/reorder",
+            json={"column_ids": ["col-backlog"]},
+        )
+        assert resp.status_code == 401
+
+    def test_reorder_ignores_foreign_column_ids(self, auth_client):
+        boards = auth_client.get("/api/boards").json()
+        board_id = boards[0]["id"]
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        col_ids = [c["id"] for c in board["columns"]]
+        # Include a foreign ID — should be ignored
+        resp = auth_client.patch(
+            f"/api/boards/{board_id}/columns/reorder",
+            json={"column_ids": col_ids + ["col-does-not-belong"]},
+        )
+        assert resp.status_code == 200
+
 
 class TestAdmin:
     def test_list_users_requires_admin(self, auth_client):

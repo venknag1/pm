@@ -7,7 +7,8 @@ async function loginUser(page: Parameters<typeof test>[1] extends (arg: infer T)
   await page.getByLabel(/username/i).fill("user");
   await page.getByLabel(/password/i).fill("password");
   await page.getByRole("button", { name: /sign in/i }).click();
-  await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
+  // User has exactly one board → goes directly to board view
+  await expect(page.locator('[data-testid^="column-"]').first()).toBeVisible();
 }
 
 test("loads the kanban board with five columns", async ({ page }) => {
@@ -49,4 +50,23 @@ test("moves a card between columns via drag and drop", async ({ page }) => {
   await page.mouse.up();
 
   await expect(targetColumn.getByText(title)).toBeVisible();
+});
+
+test("filter bar appears when filter button is clicked", async ({ page }) => {
+  await loginUser(page);
+  await page.getByRole("button", { name: /filter/i }).click();
+  await expect(page.getByPlaceholder(/search cards/i)).toBeVisible();
+});
+
+test("add column button shows column form", async ({ page }) => {
+  await loginUser(page);
+  await page.getByRole("button", { name: /add column/i }).click();
+  await expect(page.getByPlaceholder(/column title/i)).toBeVisible();
+});
+
+test("back button goes to board selector", async ({ page }) => {
+  await loginUser(page);
+  await page.getByLabel(/back to boards/i).click();
+  await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
+  await expect(page.getByText("Your Boards")).toBeVisible();
 });

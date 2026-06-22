@@ -10,7 +10,8 @@
       "Bash(./scripts/start.sh)",
       "Bash(python -m pytest tests/test_api.py -x -q)",
       "Bash(python -m pytest tests/test_api.py -q)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(git commit *)"
     ]
   }
 }

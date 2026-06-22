@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { listBoards, createBoard, deleteBoard, renameBoard, type BoardSummary } from "@/lib/api";
+import { ChangePasswordForm } from "@/components/ChangePasswordForm";
 
 type BoardSelectorProps = {
   onSelectBoard: (boardId: number, boardTitle: string) => void;
@@ -25,6 +26,7 @@ export const BoardSelector = ({
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [showProfile, setShowProfile] = useState(false);
 
   useEffect(() => {
     listBoards()
@@ -121,6 +123,17 @@ export const BoardSelector = ({
               </button>
             )}
             <button
+              onClick={() => setShowProfile((p) => !p)}
+              className="flex items-center gap-2 rounded-xl border border-[var(--stroke)] bg-[var(--surface)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.15em] text-[var(--gray-text)] transition hover:border-[var(--primary-blue)] hover:text-[var(--primary-blue)]"
+              aria-label="Account settings"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                <circle cx="7" cy="5" r="2.5" stroke="currentColor" strokeWidth="1.4"/>
+                <path d="M2 12c0-2.2 2.239-4 5-4s5 1.8 5 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+              </svg>
+              Profile
+            </button>
+            <button
               onClick={onLogout}
               className="flex items-center gap-2 rounded-xl border border-[var(--stroke)] bg-[var(--surface)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.15em] text-[var(--gray-text)] transition hover:border-[var(--secondary-purple)] hover:text-[var(--secondary-purple)]"
             >
@@ -136,6 +149,13 @@ export const BoardSelector = ({
           <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
             {error}
           </p>
+        )}
+
+        {showProfile && (
+          <div className="rounded-2xl border border-[var(--stroke)] bg-white/80 p-6 shadow-[var(--shadow)] backdrop-blur">
+            <h2 className="mb-4 font-semibold text-[var(--navy-dark)]">Change Password</h2>
+            <ChangePasswordForm onDone={() => setShowProfile(false)} />
+          </div>
         )}
 
         <div className="flex items-center justify-between">

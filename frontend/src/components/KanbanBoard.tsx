@@ -14,12 +14,13 @@ import {
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
 import { AISidebar } from "@/components/AISidebar";
-import { moveCard, type BoardData } from "@/lib/kanban";
+import { moveCard, type BoardData, type Card } from "@/lib/kanban";
 import {
   getBoardById,
   renameColumn,
   createColumn,
   deleteColumn,
+  reorderColumns,
   createCard,
   deleteCard,
   moveCard as moveCardApi,
@@ -32,12 +33,20 @@ type KanbanBoardProps = {
   onLogout: () => void;
 };
 
+type FilterState = {
+  search: string;
+  priority: "all" | "low" | "medium" | "high";
+  label: string;
+};
+
 export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoardProps) => {
   const [board, setBoard] = useState<BoardData | null>(null);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [addingColumn, setAddingColumn] = useState(false);
   const [newColumnTitle, setNewColumnTitle] = useState("");
+  const [filter, setFilter] = useState<FilterState>({ search: "", priority: "all", label: "" });
+  const [showFilter, setShowFilter] = useState(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
@@ -49,6 +58,30 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
 
   const cardsById = useMemo(() => board?.cards ?? {}, [board?.cards]);
 
+  // All unique labels used on this board
+  const allLabels = useMemo(() => {
+    const labels = new Set<string>();
+    Object.values(board?.cards ?? {}).forEach((c) => { if (c.label) labels.add(c.label); });
+    return Array.from(labels).sort();
+  }, [board?.cards]);
+
+  // Filter cards based on current filter state
+  const filteredCardIds = useMemo(() => {
+    const { search, priority, label } = filter;
+    if (!search && priority === "all" && !label) return null; // no filter active
+    const lc = search.toLowerCase();
+    return new Set(
+      Object.values(cardsById)
+        .filter((c) => {
+          if (search && !c.title.toLowerCase().includes(lc) && !c.details.toLowerCase().includes(lc)) return false;
+          if (priority !== "all" && c.priority !== priority) return false;
+          if (label && c.label !== label) return false;
+          return true;
+        })
+        .map((c) => c.id)
+    );
+  }, [cardsById, filter]);
+
   const handleDragStart = (event: DragStartEvent) => {
     setActiveCardId(event.active.id as string);
   };
@@ -57,6 +90,20 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
     const { active, over } = event;
     setActiveCardId(null);
     if (!over || active.id === over.id || !board) return;
+
+    // Check if dragging a column
+    if (board.columns.some((c) => c.id === active.id)) {
+      const oldIndex = board.columns.findIndex((c) => c.id === active.id);
+      const newIndex = board.columns.findIndex((c) => c.id === over.id);
+      if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return;
+
+      const newColumns = [...board.columns];
+      const [moved] = newColumns.splice(oldIndex, 1);
+      newColumns.splice(newIndex, 0, moved);
+      setBoard((prev) => prev ? { ...prev, columns: newColumns } : null);
+      reorderColumns(boardId, newColumns.map((c) => c.id)).catch(console.error);
+      return;
+    }
 
     const newColumns = moveCard(board.columns, active.id as string, over.id as string);
     setBoard((prev) => (prev ? { ...prev, columns: newColumns } : null));
@@ -98,8 +145,7 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
   };
 
   const handleDeleteColumn = async (columnId: string) => {
-    if (!board) return;
-    if (board.columns.length <= 1) return;
+    if (!board || board.columns.length <= 1) return;
     try {
       await deleteColumn(boardId, columnId);
       setBoard((prev) => {
@@ -114,7 +160,7 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
           ),
         };
       });
-    } catch (err: unknown) {
+    } catch (err) {
       console.error(err);
     }
   };
@@ -149,12 +195,26 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
     deleteCard(cardId).catch(console.error);
   };
 
+  const handleUpdateCard = (cardId: string, updates: Partial<Card>) => {
+    setBoard((prev) => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        cards: {
+          ...prev.cards,
+          [cardId]: { ...prev.cards[cardId], ...updates },
+        },
+      };
+    });
+  };
+
   const activeCard = activeCardId ? cardsById[activeCardId] : null;
+
+  const filterActive = filter.search || filter.priority !== "all" || filter.label;
 
   if (!board) {
     return (
       <div className="relative overflow-hidden">
-        <div className="pointer-events-none absolute left-0 top-0 h-[420px] w-[420px] -translate-x-1/3 -translate-y-1/3 rounded-full bg-[radial-gradient(circle,_rgba(32,157,215,0.25)_0%,_rgba(32,157,215,0.05)_55%,_transparent_70%)]" />
         <main className="relative mx-auto flex min-h-screen max-w-[1600px] items-center justify-center">
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">
             Loading board...
@@ -193,6 +253,19 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
           </div>
           <div className="flex items-center gap-3">
             <button
+              onClick={() => setShowFilter((f) => !f)}
+              className={`flex items-center gap-2 rounded-xl border px-4 py-2 text-xs font-semibold uppercase tracking-[0.15em] transition ${
+                filterActive
+                  ? "border-[var(--primary-blue)] bg-[var(--primary-blue)] text-white"
+                  : "border-[var(--stroke)] bg-[var(--surface)] text-[var(--gray-text)] hover:border-[var(--primary-blue)] hover:text-[var(--primary-blue)]"
+              }`}
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                <path d="M1 3h12M3 7h8M5 11h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+              </svg>
+              Filter{filterActive ? " (active)" : ""}
+            </button>
+            <button
               onClick={() => setAddingColumn(true)}
               className="flex items-center gap-2 rounded-xl border border-[var(--stroke)] bg-[var(--surface)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.15em] text-[var(--gray-text)] transition hover:border-[var(--primary-blue)] hover:text-[var(--primary-blue)]"
             >
@@ -223,6 +296,66 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
             </button>
           </div>
         </header>
+
+        {showFilter && (
+          <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-[var(--stroke)] bg-white/80 px-5 py-3 shadow-[var(--shadow)] backdrop-blur">
+            <input
+              type="search"
+              placeholder="Search cards..."
+              value={filter.search}
+              onChange={(e) => setFilter((f) => ({ ...f, search: e.target.value }))}
+              className="w-48 rounded-xl border border-[var(--stroke)] bg-[var(--surface)] px-3 py-2 text-sm outline-none transition focus:border-[var(--primary-blue)]"
+            />
+            <div className="flex items-center gap-1">
+              <span className="text-xs font-semibold uppercase tracking-[0.15em] text-[var(--gray-text)]">Priority:</span>
+              {(["all", "low", "medium", "high"] as const).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setFilter((f) => ({ ...f, priority: p }))}
+                  className={`rounded-lg px-3 py-1 text-xs font-semibold transition ${
+                    filter.priority === p
+                      ? "bg-[var(--navy-dark)] text-white"
+                      : "bg-[var(--surface)] text-[var(--gray-text)] hover:bg-[var(--stroke)]"
+                  }`}
+                >
+                  {p === "all" ? "All" : p.charAt(0).toUpperCase() + p.slice(1)}
+                </button>
+              ))}
+            </div>
+            {allLabels.length > 0 && (
+              <div className="flex items-center gap-1">
+                <span className="text-xs font-semibold uppercase tracking-[0.15em] text-[var(--gray-text)]">Label:</span>
+                <button
+                  onClick={() => setFilter((f) => ({ ...f, label: "" }))}
+                  className={`rounded-lg px-3 py-1 text-xs font-semibold transition ${
+                    !filter.label ? "bg-[var(--navy-dark)] text-white" : "bg-[var(--surface)] text-[var(--gray-text)] hover:bg-[var(--stroke)]"
+                  }`}
+                >
+                  All
+                </button>
+                {allLabels.map((l) => (
+                  <button
+                    key={l}
+                    onClick={() => setFilter((f) => ({ ...f, label: f.label === l ? "" : l }))}
+                    className={`rounded-lg px-3 py-1 text-xs font-semibold transition ${
+                      filter.label === l ? "bg-[var(--navy-dark)] text-white" : "bg-[var(--surface)] text-[var(--gray-text)] hover:bg-[var(--stroke)]"
+                    }`}
+                  >
+                    {l}
+                  </button>
+                ))}
+              </div>
+            )}
+            {filterActive && (
+              <button
+                onClick={() => setFilter({ search: "", priority: "all", label: "" })}
+                className="ml-auto text-xs text-[var(--gray-text)] transition hover:text-red-500"
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
+        )}
 
         {addingColumn && (
           <form
@@ -260,19 +393,27 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
           onDragEnd={handleDragEnd}
         >
           <section className="flex gap-4 overflow-x-auto pb-2">
-            {board.columns.map((column) => (
-              <div key={column.id} className="min-w-[260px] flex-1">
-                <KanbanColumn
-                  column={column}
-                  cards={column.cardIds.map((cardId) => board.cards[cardId]).filter(Boolean)}
-                  onRename={handleRenameColumn}
-                  onAddCard={handleAddCard}
-                  onDeleteCard={handleDeleteCard}
-                  onDeleteColumn={handleDeleteColumn}
-                  canDelete={board.columns.length > 1}
-                />
-              </div>
-            ))}
+            {board.columns.map((column) => {
+              const visibleCards = column.cardIds
+                .map((id) => board.cards[id])
+                .filter(Boolean)
+                .filter((c) => !filteredCardIds || filteredCardIds.has(c.id));
+
+              return (
+                <div key={column.id} className="min-w-[260px] flex-1">
+                  <KanbanColumn
+                    column={column}
+                    cards={visibleCards}
+                    onRename={handleRenameColumn}
+                    onAddCard={handleAddCard}
+                    onDeleteCard={handleDeleteCard}
+                    onUpdateCard={handleUpdateCard}
+                    onDeleteColumn={handleDeleteColumn}
+                    canDelete={board.columns.length > 1}
+                  />
+                </div>
+              );
+            })}
           </section>
           <DragOverlay>
             {activeCard ? (

@@ -21,6 +21,7 @@ from .models import (
     BoardSummary,
     BoardUpdate,
     CardData,
+    ChangePasswordRequest,
     ColumnData,
     CreateBoardRequest,
     CreateCardRequest,
@@ -30,6 +31,7 @@ from .models import (
     RegisterRequest,
     RenameBoardRequest,
     RenameColumnRequest,
+    ReorderColumnsRequest,
     UpdateCardRequest,
     UserSummary,
 )
@@ -43,6 +45,8 @@ You are a Kanban board assistant. Output ONLY a JSON object — no preamble, no 
 BOARD STATE (columns ordered left-to-right; "position" is the 0-based column index):
 {board_json}
 
+Each card may include: id, title, details, priority (low/medium/high), due_date (YYYY-MM-DD), label.
+
 CRITICAL — your "reply" text is shown to the user but does NOT change the board.
 Board changes happen ONLY through the board_update field.
 If board_update is null, NOTHING on the board changes, even if your reply says it did.
@@ -53,7 +57,7 @@ Output format:
 
 When making board changes, board_update is an object with any combination of these keys:
   "move_cards":      [{{"card_id": "<EXACT id>", "column_id": "<EXACT col id>", "position": <0-based slot in target column>}}]
-  "create_cards":    [{{"column_id": "<EXACT col id>", "title": "...", "details": "..."}}]
+  "create_cards":    [{{"column_id": "<EXACT col id>", "title": "...", "details": "...", "priority": "low|medium|high", "due_date": "YYYY-MM-DD or omit", "label": "bug|feature|chore|design|docs or omit"}}]
   "delete_card_ids": ["<EXACT card id>"]
   "rename_columns":  [{{"column_id": "<EXACT col id>", "title": "..."}}]
 
@@ -61,7 +65,8 @@ Rules:
 - Copy IDs verbatim from the board state above. Never shorten or invent IDs.
 - "Left" means the column at position N-1. "Right" means the column at position N+1.
 - Cards in the position-0 column are already at the far left — skip them when moving left.
-- position in move_cards is the 0-based slot index within the target column.\
+- position in move_cards is the 0-based slot index within the target column.
+- When creating cards, omit due_date and label if not specified by the user.\
 """
 
 
@@ -145,16 +150,23 @@ def _board_for_prompt(db, board_id: int) -> dict:
         (board_id,),
     ).fetchall()
     all_cards = db.execute(
-        "SELECT id, column_id, title, details FROM cards WHERE board_id = ? ORDER BY position",
+        "SELECT id, column_id, title, details, priority, due_date, label"
+        " FROM cards WHERE board_id = ? ORDER BY position",
         (board_id,),
     ).fetchall()
     cards_by_col: dict[str, list[dict]] = {col["id"]: [] for col in cols}
     for card in all_cards:
-        cards_by_col[card["column_id"]].append({
+        entry: dict = {
             "id": card["id"],
             "title": card["title"],
             "details": card["details"],
-        })
+            "priority": card["priority"] or "medium",
+        }
+        if card["due_date"]:
+            entry["due_date"] = card["due_date"]
+        if card["label"]:
+            entry["label"] = card["label"]
+        cards_by_col[card["column_id"]].append(entry)
     return {
         "columns": [
             {"position": i, "id": col["id"], "title": col["title"], "cards": cards_by_col[col["id"]]}
@@ -315,6 +327,23 @@ def me(user_id: int = Depends(get_current_user_id), db=Depends(get_db)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return {"username": user["username"], "is_admin": bool(user["is_admin"])}
+
+
+@app.patch("/api/auth/password")
+def change_password(
+    req: ChangePasswordRequest,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    user = db.execute("SELECT password_hash FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user or not verify_password(req.current_password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+    with db:
+        db.execute(
+            "UPDATE users SET password_hash = ? WHERE id = ?",
+            (hash_password(req.new_password), user_id),
+        )
+    return {"ok": True}
 
 
 @app.post("/api/auth/register", status_code=201)
@@ -494,6 +523,30 @@ def delete_column(
             "UPDATE columns SET position = position - 1 WHERE board_id = ? AND position > ?",
             (board_id, col["position"]),
         )
+    return {"ok": True}
+
+
+@app.patch("/api/boards/{board_id}/columns/reorder")
+def reorder_columns(
+    board_id: int,
+    req: ReorderColumnsRequest,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    _get_board_by_id(db, board_id, user_id)
+    existing_ids = {
+        row["id"]
+        for row in db.execute(
+            "SELECT id FROM columns WHERE board_id = ?", (board_id,)
+        ).fetchall()
+    }
+    # Only update positions for IDs that belong to this board
+    valid = [cid for cid in req.column_ids if cid in existing_ids]
+    with db:
+        for position, col_id in enumerate(valid):
+            db.execute(
+                "UPDATE columns SET position = ? WHERE id = ?", (position, col_id)
+            )
     return {"ok": True}
 
 
