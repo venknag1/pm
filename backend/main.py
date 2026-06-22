@@ -3,6 +3,7 @@ import os
 import random
 import string
 import time
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from .models import (
     AIResponseBody,
     ArchivedCard,
     AssignCardRequest,
+    BoardExportResponse,
     BoardResponse,
     BoardStats,
     BoardSummary,
@@ -36,6 +38,7 @@ from .models import (
     CreateCommentRequest,
     LoginRequest,
     MoveCardRequest,
+    MoveCardToBoardRequest,
     RegisterRequest,
     RenameBoardRequest,
     RenameColumnRequest,
@@ -843,6 +846,101 @@ def get_activity(
         )
         for row in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# Move card to a different board
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/cards/{card_id}/move-to-board")
+def move_card_to_board(
+    card_id: str,
+    req: MoveCardToBoardRequest,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    _get_card_for_user(db, card_id, user_id)
+    card_row = db.execute(
+        "SELECT id, title, column_id, board_id, position FROM cards WHERE id = ?", (card_id,)
+    ).fetchone()
+    src_board_id = card_row["board_id"]
+
+    if src_board_id == req.target_board_id:
+        raise HTTPException(status_code=400, detail="Card is already on this board")
+
+    target = db.execute(
+        "SELECT id FROM boards WHERE id = ? AND user_id = ?",
+        (req.target_board_id, user_id),
+    ).fetchone()
+    if not target:
+        raise HTTPException(status_code=404, detail="Target board not found")
+
+    first_col = db.execute(
+        "SELECT id FROM columns WHERE board_id = ? ORDER BY position LIMIT 1",
+        (req.target_board_id,),
+    ).fetchone()
+    if not first_col:
+        raise HTTPException(status_code=400, detail="Target board has no columns")
+
+    old_col_id = card_row["column_id"]
+    old_pos = card_row["position"]
+    max_pos = db.execute(
+        "SELECT COALESCE(MAX(position), -1) FROM cards WHERE column_id = ?",
+        (first_col["id"],),
+    ).fetchone()[0]
+
+    with db:
+        db.execute(
+            "UPDATE cards SET position = position - 1 WHERE column_id = ? AND position > ?",
+            (old_col_id, old_pos),
+        )
+        db.execute(
+            "UPDATE cards SET column_id = ?, board_id = ?, position = ? WHERE id = ?",
+            (first_col["id"], req.target_board_id, max_pos + 1, card_id),
+        )
+        _log(db, src_board_id, user_id, "card_moved_out", f"Card '{card_row['title']}' moved to another board", card_id)
+        _log(db, req.target_board_id, user_id, "card_moved_in", f"Card '{card_row['title']}' moved from another board", card_id)
+
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Board export
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/boards/{board_id}/export")
+def export_board(
+    board_id: int,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    _get_board_by_id(db, board_id, user_id)
+    board_row = db.execute("SELECT title FROM boards WHERE id = ?", (board_id,)).fetchone()
+    columns = db.execute(
+        "SELECT id, title FROM columns WHERE board_id = ? ORDER BY position",
+        (board_id,),
+    ).fetchall()
+
+    result_columns = []
+    for col in columns:
+        cards = db.execute(
+            "SELECT c.title, c.details, c.priority, c.label, c.due_date, u.username AS assigned_to"
+            " FROM cards c LEFT JOIN users u ON c.assigned_to = u.id"
+            " WHERE c.column_id = ? AND c.archived = 0 ORDER BY c.position",
+            (col["id"],),
+        ).fetchall()
+        result_columns.append({
+            "column": col["title"],
+            "cards": [dict(c) for c in cards],
+        })
+
+    return {
+        "board": board_row["title"],
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "columns": result_columns,
+    }
 
 
 # ---------------------------------------------------------------------------

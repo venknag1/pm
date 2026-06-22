@@ -1535,3 +1535,110 @@ class TestBoardTemplates:
         board_id = resp.json()["id"]
         board = auth_client.get(f"/api/boards/{board_id}").json()
         assert len(board["columns"]) > 0
+
+
+class TestMoveCardToBoard:
+    def _setup(self, auth_client):
+        src = auth_client.post("/api/boards", json={"title": "Source"}).json()["id"]
+        dst = auth_client.post("/api/boards", json={"title": "Dest"}).json()["id"]
+        board = auth_client.get(f"/api/boards/{src}").json()
+        col_id = board["columns"][0]["id"]
+        card_id = auth_client.post(f"/api/boards/{src}/cards", json={"column_id": col_id, "title": "Move me"}).json()["id"]
+        return src, dst, card_id
+
+    def test_move_card_to_other_board(self, auth_client):
+        src, dst, card_id = self._setup(auth_client)
+        resp = auth_client.post(f"/api/cards/{card_id}/move-to-board", json={"target_board_id": dst})
+        assert resp.status_code == 200
+        dst_board = auth_client.get(f"/api/boards/{dst}").json()
+        all_ids = [cid for col in dst_board["columns"] for cid in col["cardIds"]]
+        assert card_id in all_ids
+
+    def test_card_removed_from_source_board(self, auth_client):
+        src, dst, card_id = self._setup(auth_client)
+        auth_client.post(f"/api/cards/{card_id}/move-to-board", json={"target_board_id": dst})
+        src_board = auth_client.get(f"/api/boards/{src}").json()
+        all_ids = [cid for col in src_board["columns"] for cid in col["cardIds"]]
+        assert card_id not in all_ids
+
+    def test_move_to_same_board_fails(self, auth_client):
+        src, _, card_id = self._setup(auth_client)
+        resp = auth_client.post(f"/api/cards/{card_id}/move-to-board", json={"target_board_id": src})
+        assert resp.status_code == 400
+
+    def test_move_to_other_users_board_fails(self, client, admin_client):
+        admin_board_id = admin_client.get("/api/boards").json()[0]["id"]
+        board = admin_client.get(f"/api/boards/{admin_board_id}").json()
+        col_id = board["columns"][0]["id"]
+        card_id = admin_client.post(f"/api/boards/{admin_board_id}/cards", json={"column_id": col_id, "title": "Admin card"}).json()["id"]
+
+        client.post("/api/auth/login", json={"username": "user", "password": "password"})
+        user_board_id = client.post("/api/boards", json={"title": "User board"}).json()["id"]
+        resp = client.post(f"/api/cards/{card_id}/move-to-board", json={"target_board_id": user_board_id})
+        assert resp.status_code == 404
+
+    def test_move_to_nonexistent_board_fails(self, auth_client):
+        src, _, card_id = self._setup(auth_client)
+        resp = auth_client.post(f"/api/cards/{card_id}/move-to-board", json={"target_board_id": 99999})
+        assert resp.status_code == 404
+
+    def test_activity_logged_on_move(self, auth_client):
+        src, dst, card_id = self._setup(auth_client)
+        auth_client.post(f"/api/cards/{card_id}/move-to-board", json={"target_board_id": dst})
+        src_activity = auth_client.get(f"/api/boards/{src}/activity").json()
+        assert any(a["action"] == "card_moved_out" for a in src_activity)
+        dst_activity = auth_client.get(f"/api/boards/{dst}/activity").json()
+        assert any(a["action"] == "card_moved_in" for a in dst_activity)
+
+
+class TestBoardExport:
+    def _setup(self, auth_client):
+        board_id = auth_client.post("/api/boards", json={"title": "Export Me"}).json()["id"]
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        col_id = board["columns"][0]["id"]
+        auth_client.post(f"/api/boards/{board_id}/cards", json={"column_id": col_id, "title": "Card A", "priority": "high"})
+        auth_client.post(f"/api/boards/{board_id}/cards", json={"column_id": col_id, "title": "Card B", "label": "bug"})
+        return board_id
+
+    def test_export_returns_board_name(self, auth_client):
+        board_id = self._setup(auth_client)
+        resp = auth_client.get(f"/api/boards/{board_id}/export")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["board"] == "Export Me"
+
+    def test_export_has_columns_with_cards(self, auth_client):
+        board_id = self._setup(auth_client)
+        data = auth_client.get(f"/api/boards/{board_id}/export").json()
+        first_col = data["columns"][0]
+        assert len(first_col["cards"]) == 2
+        titles = [c["title"] for c in first_col["cards"]]
+        assert "Card A" in titles
+        assert "Card B" in titles
+
+    def test_export_has_exported_at(self, auth_client):
+        board_id = self._setup(auth_client)
+        data = auth_client.get(f"/api/boards/{board_id}/export").json()
+        assert "exported_at" in data
+        assert data["exported_at"]
+
+    def test_export_does_not_include_archived(self, auth_client):
+        board_id = self._setup(auth_client)
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        col_id = board["columns"][0]["id"]
+        card_id = auth_client.post(f"/api/boards/{board_id}/cards", json={"column_id": col_id, "title": "Archived card"}).json()["id"]
+        auth_client.post(f"/api/cards/{card_id}/archive")
+        data = auth_client.get(f"/api/boards/{board_id}/export").json()
+        all_titles = [c["title"] for col in data["columns"] for c in col["cards"]]
+        assert "Archived card" not in all_titles
+
+    def test_export_other_users_board_fails(self, client, admin_client):
+        admin_board_id = admin_client.get("/api/boards").json()[0]["id"]
+        client.post("/api/auth/login", json={"username": "user", "password": "password"})
+        resp = client.get(f"/api/boards/{admin_board_id}/export")
+        assert resp.status_code == 404
+
+    def test_export_unauthenticated_fails(self, client):
+        client.post("/api/auth/logout")
+        resp = client.get("/api/boards/1/export")
+        assert resp.status_code == 401

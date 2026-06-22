@@ -206,3 +206,18 @@ class ArchivedCard(BaseModel):
     title: str
     column_title: str
     archived_at: str | None = None
+
+
+class MoveCardToBoardRequest(BaseModel):
+    target_board_id: int
+
+
+class BoardExportColumn(BaseModel):
+    column: str
+    cards: list[dict]
+
+
+class BoardExportResponse(BaseModel):
+    board: str
+    exported_at: str
+    columns: list[BoardExportColumn]

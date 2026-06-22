@@ -31,13 +31,14 @@ function userInitials(username: string): string {
 type KanbanCardProps = {
   card: Card;
   users: UserBrief[];
+  boardId: number;
   onDelete: (cardId: string) => void;
   onUpdate: (cardId: string, updates: Partial<Card>) => void;
   onDuplicate?: (sourceId: string, newCard: Card) => void;
   onArchive?: (cardId: string) => void;
 };
 
-export const KanbanCard = ({ card, users, onDelete, onUpdate, onDuplicate, onArchive }: KanbanCardProps) => {
+export const KanbanCard = ({ card, users, boardId, onDelete, onUpdate, onDuplicate, onArchive }: KanbanCardProps) => {
   const [modalOpen, setModalOpen] = useState(false);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: card.id });
@@ -135,6 +136,7 @@ export const KanbanCard = ({ card, users, onDelete, onUpdate, onDuplicate, onArc
         <CardModal
           card={card}
           users={users}
+          currentBoardId={boardId}
           onClose={() => setModalOpen(false)}
           onUpdate={onUpdate}
           onDuplicate={(newId) => onDuplicate?.(card.id, { ...card, id: newId, title: card.title + " (copy)", checklist_count: 0, checklist_done: 0 })}

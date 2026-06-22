@@ -388,3 +388,27 @@ export async function adminPromoteUser(userId: number): Promise<void> {
     throw new Error(body?.detail ?? "Failed to promote user");
   }
 }
+
+// --- Move card to board ---
+
+export async function moveCardToBoard(cardId: string, targetBoardId: number): Promise<void> {
+  const resp = await request(`/api/cards/${cardId}/move-to-board`, {
+    method: "POST",
+    body: JSON.stringify({ target_board_id: targetBoardId }),
+  });
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    throw new Error(body?.detail ?? "Failed to move card");
+  }
+}
+
+// --- Board export ---
+
+export type BoardExportColumn = { column: string; cards: Record<string, unknown>[] };
+export type BoardExport = { board: string; exported_at: string; columns: BoardExportColumn[] };
+
+export async function exportBoard(boardId: number): Promise<BoardExport> {
+  const resp = await request(`/api/boards/${boardId}/export`);
+  if (!resp.ok) throw new Error("Failed to export board");
+  return resp.json();
+}

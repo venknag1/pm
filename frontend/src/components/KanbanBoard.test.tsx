@@ -25,6 +25,9 @@ vi.mock("@/lib/api", () => ({
   getComments: vi.fn().mockResolvedValue([]),
   addComment: vi.fn().mockResolvedValue({ id: "c1", username: "user", content: "test", created_at: new Date().toISOString() }),
   deleteComment: vi.fn().mockResolvedValue(undefined),
+  moveCardToBoard: vi.fn().mockResolvedValue(undefined),
+  listBoards: vi.fn().mockResolvedValue([]),
+  exportBoard: vi.fn().mockResolvedValue({ board: "Test", exported_at: new Date().toISOString(), columns: [] }),
 }));
 
 const BOARD_ID = 1;

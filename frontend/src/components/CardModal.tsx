@@ -8,6 +8,7 @@ import {
   assignCard,
   archiveCard,
   duplicateCard,
+  moveCardToBoard,
   getChecklist,
   addChecklistItem,
   updateChecklistItem,
@@ -15,7 +16,9 @@ import {
   getComments,
   addComment,
   deleteComment,
+  listBoards,
   type CardComment,
+  type BoardSummary,
 } from "@/lib/api";
 
 const PRIORITY_OPTIONS: Array<{ value: "low" | "medium" | "high"; label: string; color: string }> = [
@@ -29,13 +32,14 @@ const LABEL_OPTIONS = ["bug", "feature", "chore", "design", "docs", ""];
 type CardModalProps = {
   card: Card;
   users: UserBrief[];
+  currentBoardId: number;
   onClose: () => void;
   onUpdate: (cardId: string, updates: Partial<Card>) => void;
   onDuplicate?: (newCardId: string) => void;
   onArchive?: (cardId: string) => void;
 };
 
-export const CardModal = ({ card, users, onClose, onUpdate, onDuplicate, onArchive }: CardModalProps) => {
+export const CardModal = ({ card, users, currentBoardId, onClose, onUpdate, onDuplicate, onArchive }: CardModalProps) => {
   const [title, setTitle] = useState(card.title);
   const [details, setDetails] = useState(card.details);
   const [dueDate, setDueDate] = useState(card.due_date ?? "");
@@ -48,6 +52,9 @@ export const CardModal = ({ card, users, onClose, onUpdate, onDuplicate, onArchi
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
+  const [showMoveMenu, setShowMoveMenu] = useState(false);
+  const [otherBoards, setOtherBoards] = useState<BoardSummary[]>([]);
+  const [moving, setMoving] = useState(false);
 
   // Checklist state
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
@@ -137,6 +144,31 @@ export const CardModal = ({ card, users, onClose, onUpdate, onDuplicate, onArchi
       onClose();
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleOpenMoveMenu = async () => {
+    if (!showMoveMenu) {
+      try {
+        const boards = await listBoards();
+        setOtherBoards(boards.filter((b) => b.id !== currentBoardId));
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    setShowMoveMenu((s) => !s);
+  };
+
+  const handleMoveToBoard = async (targetBoardId: number) => {
+    setMoving(true);
+    try {
+      await moveCardToBoard(card.id, targetBoardId);
+      onArchive?.(card.id); // remove from current board state
+      onClose();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setMoving(false);
     }
   };
 
@@ -478,7 +510,7 @@ export const CardModal = ({ card, users, onClose, onUpdate, onDuplicate, onArchi
         </div>
 
         <div className="flex items-center justify-between border-t border-[var(--stroke)] px-6 py-4">
-          <div className="flex gap-2">
+          <div className="relative flex gap-2">
             <button
               type="button"
               onClick={handleDuplicate}
@@ -503,6 +535,37 @@ export const CardModal = ({ card, users, onClose, onUpdate, onDuplicate, onArchi
               </svg>
               Archive
             </button>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={handleOpenMoveMenu}
+                disabled={moving}
+                className="flex items-center gap-1.5 rounded-xl border border-[var(--stroke)] px-3 py-2 text-xs font-semibold text-[var(--gray-text)] transition hover:border-[var(--primary-blue)] hover:text-[var(--primary-blue)] disabled:opacity-50"
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                  <path d="M6 1L10 6H7v5H5V6H2L6 1z" fill="currentColor" opacity="0.7"/>
+                </svg>
+                {moving ? "Moving..." : "Move to"}
+              </button>
+              {showMoveMenu && (
+                <div className="absolute bottom-full left-0 mb-1 w-48 rounded-xl border border-[var(--stroke)] bg-white shadow-lg">
+                  {otherBoards.length === 0 ? (
+                    <p className="px-3 py-2 text-xs text-[var(--gray-text)]">No other boards</p>
+                  ) : (
+                    otherBoards.map((b) => (
+                      <button
+                        key={b.id}
+                        type="button"
+                        onClick={() => handleMoveToBoard(b.id)}
+                        className="w-full px-3 py-2 text-left text-xs text-[var(--navy-dark)] transition hover:bg-[var(--surface)] first:rounded-t-xl last:rounded-b-xl"
+                      >
+                        {b.title}
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
           </div>
           <div className="flex gap-3">
             <button

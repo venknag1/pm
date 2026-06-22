@@ -139,6 +139,7 @@ export const KanbanColumn = ({
               key={card.id}
               card={card}
               users={users}
+              boardId={boardId}
               onDelete={(cardId) => onDeleteCard(column.id, cardId)}
               onUpdate={onUpdateCard}
               onDuplicate={(sourceId, newCard) => onDuplicateCard(sourceId, newCard)}

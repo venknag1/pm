@@ -9,7 +9,9 @@ vi.mock("@/lib/api", () => ({
   updateCard: vi.fn().mockResolvedValue(undefined),
   assignCard: vi.fn().mockResolvedValue(undefined),
   archiveCard: vi.fn().mockResolvedValue(undefined),
+  moveCardToBoard: vi.fn().mockResolvedValue(undefined),
   duplicateCard: vi.fn().mockResolvedValue({ id: "card-new" }),
+  listBoards: vi.fn().mockResolvedValue([{ id: 2, title: "Other Board", created_at: new Date().toISOString(), card_count: 0 }]),
   getChecklist: vi.fn().mockResolvedValue([]),
   addChecklistItem: vi.fn().mockResolvedValue({ id: "chk-1", title: "New item", completed: false, position: 0 }),
   updateChecklistItem: vi.fn().mockResolvedValue({ id: "chk-1", title: "New item", completed: true, position: 0 }),
@@ -37,16 +39,19 @@ const renderModal = (overrides: Partial<Card> = {}) => {
   const onClose = vi.fn();
   const onUpdate = vi.fn();
   const onDuplicate = vi.fn();
+  const onArchive = vi.fn();
   render(
     <CardModal
       card={{ ...CARD, ...overrides }}
       users={USERS}
+      currentBoardId={1}
       onClose={onClose}
       onUpdate={onUpdate}
       onDuplicate={onDuplicate}
+      onArchive={onArchive}
     />
   );
-  return { onClose, onUpdate, onDuplicate };
+  return { onClose, onUpdate, onDuplicate, onArchive };
 };
 
 describe("CardModal", () => {

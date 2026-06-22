@@ -21,6 +21,7 @@ import {
   getBoardActivity,
   listArchivedCards,
   unarchiveCard,
+  exportBoard,
   listUsers,
   renameColumn,
   createColumn,
@@ -46,6 +47,8 @@ type FilterState = {
   search: string;
   priority: "all" | "low" | "medium" | "high";
   label: string;
+  assignee: string;
+  overdue: boolean;
 };
 
 export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoardProps) => {
@@ -54,7 +57,7 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [addingColumn, setAddingColumn] = useState(false);
   const [newColumnTitle, setNewColumnTitle] = useState("");
-  const [filter, setFilter] = useState<FilterState>({ search: "", priority: "all", label: "" });
+  const [filter, setFilter] = useState<FilterState>({ search: "", priority: "all", label: "", assignee: "", overdue: false });
   const [showFilter, setShowFilter] = useState(false);
   const [users, setUsers] = useState<UserBrief[]>([]);
   const [showStats, setShowStats] = useState(false);
@@ -122,15 +125,18 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
   }, [board?.cards]);
 
   const filteredCardIds = useMemo(() => {
-    const { search, priority, label } = filter;
-    if (!search && priority === "all" && !label) return null;
+    const { search, priority, label, assignee, overdue } = filter;
+    if (!search && priority === "all" && !label && !assignee && !overdue) return null;
     const lc = search.toLowerCase();
+    const today = new Date(new Date().toDateString());
     return new Set(
       Object.values(cardsById)
         .filter((c) => {
           if (search && !c.title.toLowerCase().includes(lc) && !c.details.toLowerCase().includes(lc)) return false;
           if (priority !== "all" && c.priority !== priority) return false;
           if (label && c.label !== label) return false;
+          if (assignee && c.assigned_to_username !== assignee) return false;
+          if (overdue && (!c.due_date || new Date(c.due_date) >= today)) return false;
           return true;
         })
         .map((c) => c.id)
@@ -303,7 +309,7 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
   };
 
   const activeCard = activeCardId ? cardsById[activeCardId] : null;
-  const filterActive = filter.search || filter.priority !== "all" || filter.label;
+  const filterActive = filter.search || filter.priority !== "all" || filter.label || filter.assignee || filter.overdue;
 
   if (!board) {
     return (
@@ -387,6 +393,29 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
                 <path d="M1 4h12M5 1.5h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
               </svg>
               Archive
+            </button>
+            <button
+              onClick={async () => {
+                try {
+                  const data = await exportBoard(boardId);
+                  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `${boardTitle.replace(/\s+/g, "_")}_export.json`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                } catch (err) {
+                  console.error(err);
+                }
+              }}
+              className="flex items-center gap-2 rounded-xl border border-[var(--stroke)] bg-[var(--surface)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.15em] text-[var(--gray-text)] transition hover:border-[var(--primary-blue)] hover:text-[var(--primary-blue)]"
+              title="Export board as JSON"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                <path d="M7 1v8M4 6l3 3 3-3M1 10v1.5A1.5 1.5 0 002.5 13h9a1.5 1.5 0 001.5-1.5V10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              Export
             </button>
             <button
               onClick={() => setShowFilter((f) => !f)}
@@ -564,9 +593,33 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
                 ))}
               </div>
             )}
+            {users.length > 0 && (
+              <div className="flex items-center gap-1">
+                <span className="text-xs font-semibold uppercase tracking-[0.15em] text-[var(--gray-text)]">Assignee:</span>
+                <select
+                  value={filter.assignee}
+                  onChange={(e) => setFilter((f) => ({ ...f, assignee: e.target.value }))}
+                  className="rounded-lg border border-[var(--stroke)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--navy-dark)] outline-none transition focus:border-[var(--primary-blue)]"
+                >
+                  <option value="">All</option>
+                  {users.map((u) => (
+                    <option key={u.id} value={u.username}>{u.username}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={filter.overdue}
+                onChange={(e) => setFilter((f) => ({ ...f, overdue: e.target.checked }))}
+                className="h-3.5 w-3.5 cursor-pointer accent-red-500"
+              />
+              <span className="text-xs font-semibold text-[var(--gray-text)]">Overdue only</span>
+            </label>
             {filterActive && (
               <button
-                onClick={() => setFilter({ search: "", priority: "all", label: "" })}
+                onClick={() => setFilter({ search: "", priority: "all", label: "", assignee: "", overdue: false })}
                 className="ml-auto text-xs text-[var(--gray-text)] transition hover:text-red-500"
               >
                 Clear filters
