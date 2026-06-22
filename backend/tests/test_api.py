@@ -316,7 +316,7 @@ class TestAI:
         with _mock_openai() as mock_cls:
             auth_client.post("/api/ai", json={"message": "hi"})
         call_kwargs = mock_cls.return_value.chat.completions.create.call_args.kwargs
-        assert call_kwargs["model"] == "meta-llama/llama-3.3-70b-instruct"
+        assert call_kwargs["model"] == "openai/gpt-oss-120b:free"
         assert "response_format" not in call_kwargs
 
     def test_ai_creates_card_via_board_update(self, auth_client, monkeypatch):

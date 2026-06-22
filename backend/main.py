@@ -29,7 +29,7 @@ from .models import (
 )
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-AI_MODEL = "meta-llama/llama-3.3-70b-instruct"
+AI_MODEL = "openai/gpt-oss-120b:free"
 
 _AI_SYSTEM_PROMPT = """\
 You are a Kanban board assistant. Output ONLY a JSON object — no preamble, no markdown.

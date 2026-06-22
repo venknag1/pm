@@ -16,7 +16,7 @@ The FastAPI backend (`backend/main.py`) serves the built frontend as static file
 
 **Frontend** (`frontend/`): Next.js 16 / React 19, Tailwind CSS v4, `@dnd-kit` for drag-and-drop. Board state and types live in `src/lib/kanban.ts`. Main components: `KanbanBoard`, `KanbanColumn`, `KanbanCard`, `KanbanCardPreview`, `NewCardForm`.
 
-**Backend** (`backend/main.py`): FastAPI. Env vars loaded from `.env` at project root. AI calls go through OpenRouter (env var: `OPENROUTER_API_KEY`); use model `meta-llama/llama-3.3-70b-instruct`. SQLite for persistence (created on startup if absent).
+**Backend** (`backend/main.py`): FastAPI. Env vars loaded from `.env` at project root. AI calls go through OpenRouter (env var: `OPENROUTER_API_KEY`); use model `openai/gpt-oss-120b:free`. SQLite for persistence (created on startup if absent).
 
 ## Running the app
 
