@@ -6,11 +6,16 @@ import type { UserBrief } from "@/lib/api";
 import {
   updateCard,
   assignCard,
+  archiveCard,
   duplicateCard,
   getChecklist,
   addChecklistItem,
   updateChecklistItem,
   deleteChecklistItem,
+  getComments,
+  addComment,
+  deleteComment,
+  type CardComment,
 } from "@/lib/api";
 
 const PRIORITY_OPTIONS: Array<{ value: "low" | "medium" | "high"; label: string; color: string }> = [
@@ -27,9 +32,10 @@ type CardModalProps = {
   onClose: () => void;
   onUpdate: (cardId: string, updates: Partial<Card>) => void;
   onDuplicate?: (newCardId: string) => void;
+  onArchive?: (cardId: string) => void;
 };
 
-export const CardModal = ({ card, users, onClose, onUpdate, onDuplicate }: CardModalProps) => {
+export const CardModal = ({ card, users, onClose, onUpdate, onDuplicate, onArchive }: CardModalProps) => {
   const [title, setTitle] = useState(card.title);
   const [details, setDetails] = useState(card.details);
   const [dueDate, setDueDate] = useState(card.due_date ?? "");
@@ -49,6 +55,11 @@ export const CardModal = ({ card, users, onClose, onUpdate, onDuplicate }: CardM
   const [newItemTitle, setNewItemTitle] = useState("");
   const [addingItem, setAddingItem] = useState(false);
 
+  // Comments state
+  const [comments, setComments] = useState<CardComment[]>([]);
+  const [newComment, setNewComment] = useState("");
+  const [addingComment, setAddingComment] = useState(false);
+
   const titleRef = useRef<HTMLInputElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
 
@@ -58,6 +69,7 @@ export const CardModal = ({ card, users, onClose, onUpdate, onDuplicate }: CardM
       setChecklist(items);
       setChecklistLoaded(true);
     }).catch(() => setChecklistLoaded(true));
+    getComments(card.id).then(setComments).catch(() => {});
   }, [card.id]);
 
   useEffect(() => {
@@ -115,6 +127,38 @@ export const CardModal = ({ card, users, onClose, onUpdate, onDuplicate }: CardM
       console.error(err);
     } finally {
       setDuplicating(false);
+    }
+  };
+
+  const handleArchive = async () => {
+    try {
+      await archiveCard(card.id);
+      onArchive?.(card.id);
+      onClose();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleAddComment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newComment.trim()) return;
+    try {
+      const comment = await addComment(card.id, newComment.trim());
+      setComments((prev) => [...prev, comment]);
+      setNewComment("");
+      setAddingComment(false);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDeleteComment = async (commentId: string) => {
+    try {
+      await deleteComment(card.id, commentId);
+      setComments((prev) => prev.filter((c) => c.id !== commentId));
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -361,21 +405,105 @@ export const CardModal = ({ card, users, onClose, onUpdate, onDuplicate }: CardM
               </form>
             )}
           </div>
+
+          {/* Comments */}
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <label className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">
+                Comments {comments.length > 0 && <span className="font-normal normal-case tracking-normal">({comments.length})</span>}
+              </label>
+              {!addingComment && (
+                <button
+                  type="button"
+                  onClick={() => setAddingComment(true)}
+                  className="text-xs text-[var(--primary-blue)] transition hover:underline"
+                >
+                  + Add comment
+                </button>
+              )}
+            </div>
+
+            {comments.length > 0 && (
+              <div className="mb-2 flex flex-col gap-2">
+                {comments.map((c) => (
+                  <div key={c.id} className="group flex gap-2 rounded-xl border border-[var(--stroke)] bg-[var(--surface)] px-3 py-2">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--secondary-purple)] text-[9px] font-bold text-white">
+                      {c.username.slice(0, 2).toUpperCase()}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold text-[var(--navy-dark)]">{c.username}</span>
+                        <span className="text-[10px] text-[var(--gray-text)]">
+                          {new Date(c.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-xs text-[var(--gray-text)] break-words">{c.content}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteComment(c.id)}
+                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--gray-text)] opacity-0 transition hover:text-red-400 group-hover:opacity-100"
+                      aria-label="Delete comment"
+                    >
+                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                        <path d="M1 1l8 8M9 1L1 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {addingComment && (
+              <form onSubmit={handleAddComment} className="flex flex-col gap-2">
+                <textarea
+                  autoFocus
+                  rows={2}
+                  placeholder="Write a comment..."
+                  value={newComment}
+                  onChange={(e) => setNewComment(e.target.value)}
+                  className="w-full resize-none rounded-xl border border-[var(--stroke)] bg-[var(--surface)] px-3 py-2 text-sm outline-none focus:border-[var(--primary-blue)]"
+                />
+                <div className="flex gap-2">
+                  <button type="submit" className="text-xs font-semibold text-[var(--primary-blue)]">Post</button>
+                  <button type="button" onClick={() => { setAddingComment(false); setNewComment(""); }} className="text-xs text-[var(--gray-text)]">Cancel</button>
+                </div>
+              </form>
+            )}
+
+            {comments.length === 0 && !addingComment && (
+              <p className="text-xs text-[var(--gray-text)]">No comments yet.</p>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center justify-between border-t border-[var(--stroke)] px-6 py-4">
-          <button
-            type="button"
-            onClick={handleDuplicate}
-            disabled={duplicating}
-            className="flex items-center gap-1.5 rounded-xl border border-[var(--stroke)] px-4 py-2 text-xs font-semibold text-[var(--gray-text)] transition hover:border-[var(--primary-blue)] hover:text-[var(--primary-blue)] disabled:opacity-50"
-          >
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-              <rect x="1" y="3" width="7" height="8" rx="1.2" stroke="currentColor" strokeWidth="1.3"/>
-              <path d="M4 3V2a1 1 0 011-1h5a1 1 0 011 1v7a1 1 0 01-1 1h-1" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-            </svg>
-            {duplicating ? "Copying..." : "Duplicate"}
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleDuplicate}
+              disabled={duplicating}
+              className="flex items-center gap-1.5 rounded-xl border border-[var(--stroke)] px-3 py-2 text-xs font-semibold text-[var(--gray-text)] transition hover:border-[var(--primary-blue)] hover:text-[var(--primary-blue)] disabled:opacity-50"
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                <rect x="1" y="3" width="7" height="8" rx="1.2" stroke="currentColor" strokeWidth="1.3"/>
+                <path d="M4 3V2a1 1 0 011-1h5a1 1 0 011 1v7a1 1 0 01-1 1h-1" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+              </svg>
+              {duplicating ? "Copying..." : "Duplicate"}
+            </button>
+            <button
+              type="button"
+              onClick={handleArchive}
+              className="flex items-center gap-1.5 rounded-xl border border-[var(--stroke)] px-3 py-2 text-xs font-semibold text-[var(--gray-text)] transition hover:border-amber-400 hover:text-amber-600"
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                <rect x="1" y="3.5" width="10" height="7" rx="1.2" stroke="currentColor" strokeWidth="1.3"/>
+                <path d="M1 3.5h10M4.5 1.5h3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+                <path d="M4.5 6.5l1 1 2-2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              Archive
+            </button>
+          </div>
           <div className="flex gap-3">
             <button
               type="button"

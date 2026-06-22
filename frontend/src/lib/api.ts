@@ -73,10 +73,10 @@ export async function listBoards(): Promise<BoardSummary[]> {
   return resp.json();
 }
 
-export async function createBoard(title: string): Promise<{ id: number; title: string }> {
+export async function createBoard(title: string, template?: string): Promise<{ id: number; title: string }> {
   const resp = await request("/api/boards", {
     method: "POST",
-    body: JSON.stringify({ title }),
+    body: JSON.stringify({ title, template }),
   });
   if (!resp.ok) throw new Error("Failed to create board");
   return resp.json();
@@ -266,6 +266,70 @@ export type UserBrief = { id: number; username: string };
 export async function listUsers(): Promise<UserBrief[]> {
   const resp = await request("/api/users");
   if (!resp.ok) throw new Error("Failed to load users");
+  return resp.json();
+}
+
+// --- Card comments ---
+
+export type CardComment = {
+  id: string;
+  card_id: string;
+  username: string;
+  content: string;
+  created_at: string;
+};
+
+export async function getComments(cardId: string): Promise<CardComment[]> {
+  const resp = await request(`/api/cards/${cardId}/comments`);
+  if (!resp.ok) throw new Error("Failed to load comments");
+  return resp.json();
+}
+
+export async function addComment(cardId: string, content: string): Promise<CardComment> {
+  const resp = await request(`/api/cards/${cardId}/comments`, {
+    method: "POST",
+    body: JSON.stringify({ content }),
+  });
+  if (!resp.ok) throw new Error("Failed to add comment");
+  return resp.json();
+}
+
+export async function deleteComment(cardId: string, commentId: string): Promise<void> {
+  await request(`/api/cards/${cardId}/comments/${commentId}`, { method: "DELETE" });
+}
+
+// --- Card archiving ---
+
+export async function archiveCard(cardId: string): Promise<void> {
+  await request(`/api/cards/${cardId}/archive`, { method: "POST" });
+}
+
+export async function unarchiveCard(cardId: string): Promise<void> {
+  await request(`/api/cards/${cardId}/unarchive`, { method: "POST" });
+}
+
+export type ArchivedCard = { id: string; title: string; column_title: string };
+
+export async function listArchivedCards(boardId: number): Promise<ArchivedCard[]> {
+  const resp = await request(`/api/boards/${boardId}/archived`);
+  if (!resp.ok) throw new Error("Failed to load archived cards");
+  return resp.json();
+}
+
+// --- Activity log ---
+
+export type ActivityEntry = {
+  id: number;
+  username: string;
+  action: string;
+  details: string;
+  card_id: string | null;
+  created_at: string;
+};
+
+export async function getBoardActivity(boardId: number): Promise<ActivityEntry[]> {
+  const resp = await request(`/api/boards/${boardId}/activity`);
+  if (!resp.ok) throw new Error("Failed to load activity");
   return resp.json();
 }
 

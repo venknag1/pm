@@ -1342,3 +1342,196 @@ class TestBoardStats:
         client.post("/api/auth/login", json={"username": "user", "password": "password"})
         resp = client.get(f"/api/boards/{admin_board_id}/stats")
         assert resp.status_code == 404
+
+
+class TestCardArchive:
+    def _make_card(self, auth_client):
+        col_id = auth_client.get("/api/board").json()["columns"][0]["id"]
+        return auth_client.post("/api/cards", json={"column_id": col_id, "title": "Archivable"}).json()["id"]
+
+    def _board_id(self, auth_client):
+        return auth_client.get("/api/boards").json()[0]["id"]
+
+    def test_archive_card(self, auth_client):
+        card_id = self._make_card(auth_client)
+        resp = auth_client.post(f"/api/cards/{card_id}/archive")
+        assert resp.status_code == 200
+
+    def test_archived_card_not_in_board(self, auth_client):
+        card_id = self._make_card(auth_client)
+        auth_client.post(f"/api/cards/{card_id}/archive")
+        board = auth_client.get("/api/board").json()
+        assert card_id not in board["cards"]
+
+    def test_list_archived_cards(self, auth_client):
+        card_id = self._make_card(auth_client)
+        auth_client.post(f"/api/cards/{card_id}/archive")
+        board_id = self._board_id(auth_client)
+        archived = auth_client.get(f"/api/boards/{board_id}/archived").json()
+        assert any(a["id"] == card_id for a in archived)
+
+    def test_unarchive_card(self, auth_client):
+        card_id = self._make_card(auth_client)
+        auth_client.post(f"/api/cards/{card_id}/archive")
+        auth_client.post(f"/api/cards/{card_id}/unarchive")
+        board = auth_client.get("/api/board").json()
+        assert card_id in board["cards"]
+
+    def test_unarchive_removes_from_archived_list(self, auth_client):
+        card_id = self._make_card(auth_client)
+        auth_client.post(f"/api/cards/{card_id}/archive")
+        auth_client.post(f"/api/cards/{card_id}/unarchive")
+        board_id = self._board_id(auth_client)
+        archived = auth_client.get(f"/api/boards/{board_id}/archived").json()
+        assert not any(a["id"] == card_id for a in archived)
+
+    def test_archive_other_users_card_fails(self, client, admin_client):
+        col_id = admin_client.get("/api/board").json()["columns"][0]["id"]
+        card_id = admin_client.post("/api/cards", json={"column_id": col_id, "title": "Admin"}).json()["id"]
+        client.post("/api/auth/login", json={"username": "user", "password": "password"})
+        resp = client.post(f"/api/cards/{card_id}/archive")
+        assert resp.status_code == 404
+
+
+class TestComments:
+    def _make_card(self, auth_client):
+        col_id = auth_client.get("/api/board").json()["columns"][0]["id"]
+        return auth_client.post("/api/cards", json={"column_id": col_id, "title": "Card"}).json()["id"]
+
+    def test_empty_comments(self, auth_client):
+        card_id = self._make_card(auth_client)
+        resp = auth_client.get(f"/api/cards/{card_id}/comments")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_add_comment(self, auth_client):
+        card_id = self._make_card(auth_client)
+        resp = auth_client.post(f"/api/cards/{card_id}/comments", json={"content": "Nice work!"})
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["content"] == "Nice work!"
+        assert data["username"] == "user"
+        assert data["id"].startswith("cmt-")
+
+    def test_list_comments_ordered(self, auth_client):
+        card_id = self._make_card(auth_client)
+        auth_client.post(f"/api/cards/{card_id}/comments", json={"content": "First"})
+        auth_client.post(f"/api/cards/{card_id}/comments", json={"content": "Second"})
+        comments = auth_client.get(f"/api/cards/{card_id}/comments").json()
+        assert len(comments) == 2
+        assert comments[0]["content"] == "First"
+        assert comments[1]["content"] == "Second"
+
+    def test_delete_own_comment(self, auth_client):
+        card_id = self._make_card(auth_client)
+        cmt_id = auth_client.post(f"/api/cards/{card_id}/comments", json={"content": "Delete me"}).json()["id"]
+        resp = auth_client.delete(f"/api/cards/{card_id}/comments/{cmt_id}")
+        assert resp.status_code == 200
+        assert auth_client.get(f"/api/cards/{card_id}/comments").json() == []
+
+    def test_delete_nonexistent_comment(self, auth_client):
+        card_id = self._make_card(auth_client)
+        resp = auth_client.delete(f"/api/cards/{card_id}/comments/cmt-fake")
+        assert resp.status_code == 404
+
+    def test_empty_content_rejected(self, auth_client):
+        card_id = self._make_card(auth_client)
+        resp = auth_client.post(f"/api/cards/{card_id}/comments", json={"content": ""})
+        assert resp.status_code == 422
+
+    def test_comments_on_other_users_card_fails(self, client, admin_client):
+        col_id = admin_client.get("/api/board").json()["columns"][0]["id"]
+        card_id = admin_client.post("/api/cards", json={"column_id": col_id, "title": "Admin"}).json()["id"]
+        client.post("/api/auth/login", json={"username": "user", "password": "password"})
+        resp = client.get(f"/api/cards/{card_id}/comments")
+        assert resp.status_code == 404
+
+
+class TestActivityLog:
+    def _board_id(self, auth_client):
+        return auth_client.get("/api/boards").json()[0]["id"]
+
+    def test_activity_empty_initially(self, auth_client):
+        board_id = self._board_id(auth_client)
+        resp = auth_client.get(f"/api/boards/{board_id}/activity")
+        assert resp.status_code == 200
+        # May have board_created entry from setup
+        assert isinstance(resp.json(), list)
+
+    def test_card_creation_logged(self, auth_client):
+        board_id = self._board_id(auth_client)
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        col_id = board["columns"][0]["id"]
+        auth_client.post(f"/api/boards/{board_id}/cards", json={"column_id": col_id, "title": "Logged card"})
+        activity = auth_client.get(f"/api/boards/{board_id}/activity").json()
+        actions = [a["action"] for a in activity]
+        assert "card_created" in actions
+
+    def test_card_deletion_logged(self, auth_client):
+        board_id = self._board_id(auth_client)
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        col_id = board["columns"][0]["id"]
+        card_id = auth_client.post(f"/api/boards/{board_id}/cards", json={"column_id": col_id, "title": "To delete"}).json()["id"]
+        auth_client.delete(f"/api/cards/{card_id}")
+        activity = auth_client.get(f"/api/boards/{board_id}/activity").json()
+        assert any(a["action"] == "card_deleted" for a in activity)
+
+    def test_archive_logged(self, auth_client):
+        board_id = self._board_id(auth_client)
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        col_id = board["columns"][0]["id"]
+        card_id = auth_client.post(f"/api/boards/{board_id}/cards", json={"column_id": col_id, "title": "Archive me"}).json()["id"]
+        auth_client.post(f"/api/cards/{card_id}/archive")
+        activity = auth_client.get(f"/api/boards/{board_id}/activity").json()
+        assert any(a["action"] == "card_archived" for a in activity)
+
+    def test_activity_wrong_board_fails(self, client, admin_client):
+        admin_board_id = admin_client.get("/api/boards").json()[0]["id"]
+        client.post("/api/auth/login", json={"username": "user", "password": "password"})
+        resp = client.get(f"/api/boards/{admin_board_id}/activity")
+        assert resp.status_code == 404
+
+
+class TestBoardTemplates:
+    def test_default_columns_created(self, auth_client):
+        resp = auth_client.post("/api/boards", json={"title": "Default Board"})
+        board_id = resp.json()["id"]
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        titles = [c["title"] for c in board["columns"]]
+        assert "Backlog" in titles
+
+    def test_sprint_template(self, auth_client):
+        resp = auth_client.post("/api/boards", json={"title": "Sprint Board", "template": "sprint"})
+        board_id = resp.json()["id"]
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        titles = [c["title"] for c in board["columns"]]
+        assert "Sprint" in titles
+        assert "Backlog" in titles
+
+    def test_kanban_template_three_columns(self, auth_client):
+        resp = auth_client.post("/api/boards", json={"title": "Simple Board", "template": "kanban"})
+        board_id = resp.json()["id"]
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        assert len(board["columns"]) == 3
+
+    def test_bug_tracker_template(self, auth_client):
+        resp = auth_client.post("/api/boards", json={"title": "Bugs", "template": "bug-tracker"})
+        board_id = resp.json()["id"]
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        titles = [c["title"] for c in board["columns"]]
+        assert "Reported" in titles
+        assert "Resolved" in titles
+
+    def test_marketing_template(self, auth_client):
+        resp = auth_client.post("/api/boards", json={"title": "Marketing", "template": "marketing"})
+        board_id = resp.json()["id"]
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        titles = [c["title"] for c in board["columns"]]
+        assert "Published" in titles
+
+    def test_unknown_template_uses_default(self, auth_client):
+        resp = auth_client.post("/api/boards", json={"title": "Unknown", "template": "nonexistent"})
+        assert resp.status_code == 201
+        board_id = resp.json()["id"]
+        board = auth_client.get(f"/api/boards/{board_id}").json()
+        assert len(board["columns"]) > 0

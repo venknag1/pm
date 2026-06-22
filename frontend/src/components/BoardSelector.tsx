@@ -23,6 +23,7 @@ export const BoardSelector = ({
   const [loading, setLoading] = useState(true);
   const [creatingBoard, setCreatingBoard] = useState(false);
   const [newBoardTitle, setNewBoardTitle] = useState("");
+  const [selectedTemplate, setSelectedTemplate] = useState("");
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -39,9 +40,10 @@ export const BoardSelector = ({
     e.preventDefault();
     if (!newBoardTitle.trim()) return;
     try {
-      const created = await createBoard(newBoardTitle.trim());
+      const created = await createBoard(newBoardTitle.trim(), selectedTemplate || undefined);
       setBoards((prev) => [...prev, { ...created, created_at: new Date().toISOString(), card_count: 0 }]);
       setNewBoardTitle("");
+      setSelectedTemplate("");
       setCreatingBoard(false);
       onSelectBoard(created.id, created.title);
     } catch {
@@ -176,14 +178,38 @@ export const BoardSelector = ({
             onSubmit={handleCreate}
             className="flex gap-3 rounded-2xl border border-[var(--stroke)] bg-white/80 p-4 shadow-[var(--shadow)] backdrop-blur"
           >
-            <input
-              autoFocus
-              type="text"
-              placeholder="Board title"
-              value={newBoardTitle}
-              onChange={(e) => setNewBoardTitle(e.target.value)}
-              className="flex-1 rounded-xl border border-[var(--stroke)] bg-[var(--surface)] px-4 py-2 text-sm text-[var(--navy-dark)] outline-none transition focus:border-[var(--primary-blue)] focus:ring-2 focus:ring-[var(--primary-blue)]/20"
-            />
+            <div className="flex flex-1 flex-col gap-2">
+              <input
+                autoFocus
+                type="text"
+                placeholder="Board title"
+                value={newBoardTitle}
+                onChange={(e) => setNewBoardTitle(e.target.value)}
+                className="rounded-xl border border-[var(--stroke)] bg-[var(--surface)] px-4 py-2 text-sm text-[var(--navy-dark)] outline-none transition focus:border-[var(--primary-blue)] focus:ring-2 focus:ring-[var(--primary-blue)]/20"
+              />
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { value: "", label: "Default" },
+                  { value: "sprint", label: "Sprint" },
+                  { value: "kanban", label: "Kanban" },
+                  { value: "marketing", label: "Marketing" },
+                  { value: "bug-tracker", label: "Bug Tracker" },
+                ].map((t) => (
+                  <button
+                    key={t.value}
+                    type="button"
+                    onClick={() => setSelectedTemplate(t.value)}
+                    className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                      selectedTemplate === t.value
+                        ? "border-[var(--secondary-purple)] bg-[var(--secondary-purple)] text-white"
+                        : "border-[var(--stroke)] bg-[var(--surface)] text-[var(--gray-text)] hover:border-[var(--secondary-purple)]"
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <button
               type="submit"
               className="rounded-xl bg-[var(--secondary-purple)] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
@@ -192,7 +218,7 @@ export const BoardSelector = ({
             </button>
             <button
               type="button"
-              onClick={() => { setCreatingBoard(false); setNewBoardTitle(""); }}
+              onClick={() => { setCreatingBoard(false); setNewBoardTitle(""); setSelectedTemplate(""); }}
               className="rounded-xl border border-[var(--stroke)] px-4 py-2 text-sm text-[var(--gray-text)] transition hover:border-[var(--secondary-purple)]"
             >
               Cancel

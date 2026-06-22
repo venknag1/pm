@@ -117,6 +117,7 @@ class MoveCardRequest(BaseModel):
 
 class CreateBoardRequest(BaseModel):
     title: str = Field(min_length=1, max_length=100)
+    template: str | None = None  # "sprint" | "marketing" | "bug-tracker" | "kanban"
 
 
 class RenameBoardRequest(BaseModel):
@@ -177,3 +178,31 @@ class UserSummary(BaseModel):
 class UserBrief(BaseModel):
     id: int
     username: str
+
+
+class CardComment(BaseModel):
+    id: str
+    card_id: str
+    username: str
+    content: str
+    created_at: str
+
+
+class CreateCommentRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=2000)
+
+
+class ActivityEntry(BaseModel):
+    id: int
+    username: str
+    action: str
+    details: str
+    card_id: str | None = None
+    created_at: str
+
+
+class ArchivedCard(BaseModel):
+    id: str
+    title: str
+    column_title: str
+    archived_at: str | None = None

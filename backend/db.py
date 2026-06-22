@@ -72,6 +72,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if not _has_column(conn, "columns", "wip_limit"):
         conn.execute("ALTER TABLE columns ADD COLUMN wip_limit INTEGER")
 
+    # Add archived flag to cards
+    if not _has_column(conn, "cards", "archived"):
+        conn.execute("ALTER TABLE cards ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+
     conn.commit()
 
 
@@ -114,6 +118,7 @@ def init_db() -> None:
                 priority TEXT NOT NULL DEFAULT 'medium',
                 label TEXT,
                 assigned_to INTEGER,
+                archived INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE,
                 FOREIGN KEY (column_id) REFERENCES columns(id) ON DELETE CASCADE
             );
@@ -124,6 +129,25 @@ def init_db() -> None:
                 completed INTEGER NOT NULL DEFAULT 0,
                 position INTEGER NOT NULL,
                 FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS card_comments (
+                id TEXT PRIMARY KEY,
+                card_id TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS activity_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                board_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                card_id TEXT,
+                action TEXT NOT NULL,
+                details TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE
             );
         """)
 

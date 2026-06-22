@@ -9,6 +9,10 @@ vi.mock("@/lib/api", () => ({
   getBoardById: vi.fn(),
   listUsers: vi.fn().mockResolvedValue([]),
   getBoardStats: vi.fn().mockResolvedValue({ total_cards: 0, cards_by_column: {}, cards_by_priority: {}, overdue_count: 0, completed_column_id: null }),
+  getBoardActivity: vi.fn().mockResolvedValue([]),
+  listArchivedCards: vi.fn().mockResolvedValue([]),
+  unarchiveCard: vi.fn().mockResolvedValue(undefined),
+  archiveCard: vi.fn().mockResolvedValue(undefined),
   renameColumn: vi.fn().mockResolvedValue(undefined),
   createColumn: vi.fn().mockResolvedValue({ id: "col-new", title: "New Column" }),
   deleteColumn: vi.fn().mockResolvedValue(undefined),
@@ -18,6 +22,9 @@ vi.mock("@/lib/api", () => ({
   deleteCard: vi.fn().mockResolvedValue(undefined),
   moveCard: vi.fn().mockResolvedValue(undefined),
   sendAIMessage: vi.fn().mockResolvedValue({ reply: "I can help!", board: null }),
+  getComments: vi.fn().mockResolvedValue([]),
+  addComment: vi.fn().mockResolvedValue({ id: "c1", username: "user", content: "test", created_at: new Date().toISOString() }),
+  deleteComment: vi.fn().mockResolvedValue(undefined),
 }));
 
 const BOARD_ID = 1;

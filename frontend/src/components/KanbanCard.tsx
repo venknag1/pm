@@ -33,10 +33,11 @@ type KanbanCardProps = {
   users: UserBrief[];
   onDelete: (cardId: string) => void;
   onUpdate: (cardId: string, updates: Partial<Card>) => void;
-  onDuplicate?: (colId: string, newCard: Card) => void;
+  onDuplicate?: (sourceId: string, newCard: Card) => void;
+  onArchive?: (cardId: string) => void;
 };
 
-export const KanbanCard = ({ card, users, onDelete, onUpdate, onDuplicate }: KanbanCardProps) => {
+export const KanbanCard = ({ card, users, onDelete, onUpdate, onDuplicate, onArchive }: KanbanCardProps) => {
   const [modalOpen, setModalOpen] = useState(false);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: card.id });
@@ -137,6 +138,7 @@ export const KanbanCard = ({ card, users, onDelete, onUpdate, onDuplicate }: Kan
           onClose={() => setModalOpen(false)}
           onUpdate={onUpdate}
           onDuplicate={(newId) => onDuplicate?.(card.id, { ...card, id: newId, title: card.title + " (copy)", checklist_count: 0, checklist_done: 0 })}
+          onArchive={onArchive}
         />
       )}
     </>

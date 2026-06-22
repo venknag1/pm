@@ -8,11 +8,15 @@ import type { Card } from "@/lib/kanban";
 vi.mock("@/lib/api", () => ({
   updateCard: vi.fn().mockResolvedValue(undefined),
   assignCard: vi.fn().mockResolvedValue(undefined),
+  archiveCard: vi.fn().mockResolvedValue(undefined),
   duplicateCard: vi.fn().mockResolvedValue({ id: "card-new" }),
   getChecklist: vi.fn().mockResolvedValue([]),
   addChecklistItem: vi.fn().mockResolvedValue({ id: "chk-1", title: "New item", completed: false, position: 0 }),
   updateChecklistItem: vi.fn().mockResolvedValue({ id: "chk-1", title: "New item", completed: true, position: 0 }),
   deleteChecklistItem: vi.fn().mockResolvedValue(undefined),
+  getComments: vi.fn().mockResolvedValue([]),
+  addComment: vi.fn().mockResolvedValue({ id: "c1", username: "user", content: "test", created_at: new Date().toISOString() }),
+  deleteComment: vi.fn().mockResolvedValue(undefined),
 }));
 
 const CARD: Card = {

@@ -18,6 +18,7 @@ type KanbanColumnProps = {
   onDeleteCard: (columnId: string, cardId: string) => void;
   onUpdateCard: (cardId: string, updates: Partial<Card>) => void;
   onDuplicateCard: (sourceCardId: string, newCard: Card) => void;
+  onArchiveCard: (cardId: string) => void;
   onDeleteColumn?: (columnId: string) => void;
   onWipChange?: (columnId: string, limit: number | null) => void;
   canDelete?: boolean;
@@ -33,6 +34,7 @@ export const KanbanColumn = ({
   onDeleteCard,
   onUpdateCard,
   onDuplicateCard,
+  onArchiveCard,
   onDeleteColumn,
   onWipChange,
   canDelete = false,
@@ -140,6 +142,7 @@ export const KanbanColumn = ({
               onDelete={(cardId) => onDeleteCard(column.id, cardId)}
               onUpdate={onUpdateCard}
               onDuplicate={(sourceId, newCard) => onDuplicateCard(sourceId, newCard)}
+              onArchive={onArchiveCard}
             />
           ))}
         </SortableContext>

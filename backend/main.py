@@ -15,13 +15,16 @@ from pydantic import ValidationError
 from .auth import create_session_token, get_current_user_id, hash_password, verify_password
 from .db import get_db, init_db
 from .models import (
+    ActivityEntry,
     AIRequest,
     AIResponseBody,
+    ArchivedCard,
     AssignCardRequest,
     BoardResponse,
     BoardStats,
     BoardSummary,
     BoardUpdate,
+    CardComment,
     CardData,
     ChangePasswordRequest,
     ChecklistItem,
@@ -30,6 +33,7 @@ from .models import (
     CreateCardRequest,
     CreateChecklistItemRequest,
     CreateColumnRequest,
+    CreateCommentRequest,
     LoginRequest,
     MoveCardRequest,
     RegisterRequest,
@@ -45,6 +49,14 @@ from .models import (
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 AI_MODEL = "openai/gpt-oss-120b:free"
+
+BOARD_TEMPLATES: dict[str, list[tuple[str, int]]] = {
+    "default": [("Backlog", 0), ("Discovery", 1), ("In Progress", 2), ("Review", 3), ("Done", 4)],
+    "sprint": [("Backlog", 0), ("Sprint", 1), ("In Progress", 2), ("Review", 3), ("Done", 4)],
+    "marketing": [("Ideas", 0), ("Planning", 1), ("In Production", 2), ("Review", 3), ("Published", 4)],
+    "bug-tracker": [("Reported", 0), ("Triaged", 1), ("In Progress", 2), ("Testing", 3), ("Resolved", 4)],
+    "kanban": [("To Do", 0), ("In Progress", 1), ("Done", 2)],
+}
 
 _AI_SYSTEM_PROMPT = """\
 You are a Kanban board assistant. Output ONLY a JSON object — no preamble, no markdown.
@@ -129,7 +141,7 @@ def _build_board_response(db, board_id: int) -> BoardResponse:
         "SELECT c.id, c.column_id, c.title, c.details, c.due_date, c.priority, c.label,"
         " c.assigned_to, u.username AS assigned_to_username"
         " FROM cards c LEFT JOIN users u ON c.assigned_to = u.id"
-        " WHERE c.board_id = ? ORDER BY c.position",
+        " WHERE c.board_id = ? AND c.archived = 0 ORDER BY c.position",
         (board_id,),
     ).fetchall()
 
@@ -317,6 +329,16 @@ def _require_admin(user_id: int, db) -> None:
         raise HTTPException(status_code=403, detail="Admin access required")
 
 
+def _log(db, board_id: int, user_id: int, action: str, details: str, card_id: str | None = None) -> None:
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    db.execute(
+        "INSERT INTO activity_log (board_id, user_id, card_id, action, details, created_at)"
+        " VALUES (?, ?, ?, ?, ?, ?)",
+        (board_id, user_id, card_id, action, details, now),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
@@ -447,8 +469,8 @@ def create_board(
     db=Depends(get_db),
 ):
     from datetime import datetime, timezone
-    from .db import DEFAULT_COLUMNS
     now = datetime.now(timezone.utc).isoformat()
+    columns = BOARD_TEMPLATES.get(req.template or "", BOARD_TEMPLATES["default"])
     with db:
         db.execute(
             "INSERT INTO boards (user_id, title, created_at) VALUES (?, ?, ?)",
@@ -457,12 +479,13 @@ def create_board(
         board_id = db.execute(
             "SELECT id FROM boards WHERE user_id = ? ORDER BY id DESC LIMIT 1", (user_id,)
         ).fetchone()["id"]
-        for _, title, position in DEFAULT_COLUMNS:
+        for col_title, position in columns:
             col_id = _new_id("col")
             db.execute(
                 "INSERT INTO columns (id, board_id, title, position) VALUES (?, ?, ?, ?)",
-                (col_id, board_id, title, position),
+                (col_id, board_id, col_title, position),
             )
+        _log(db, board_id, user_id, "board_created", f"Created board '{req.title}'")
     return {"id": board_id, "title": req.title}
 
 
@@ -636,6 +659,7 @@ def create_card(
     ).fetchone()[0]
 
     card_id = _new_id("card")
+    col_title = db.execute("SELECT title FROM columns WHERE id = ?", (req.column_id,)).fetchone()["title"]
     with db:
         db.execute(
             "INSERT INTO cards (id, board_id, column_id, title, details, position,"
@@ -645,6 +669,7 @@ def create_card(
                 max_pos + 1, req.due_date, req.priority, req.label,
             ),
         )
+        _log(db, board["id"], user_id, "card_created", f"Created '{req.title}' in '{col_title}'", card_id)
     return {"id": card_id}
 
 
@@ -667,6 +692,7 @@ def create_card_on_board(
     ).fetchone()[0]
 
     card_id = _new_id("card")
+    col_title = db.execute("SELECT title FROM columns WHERE id = ?", (req.column_id,)).fetchone()["title"]
     with db:
         db.execute(
             "INSERT INTO cards (id, board_id, column_id, title, details, position,"
@@ -676,6 +702,7 @@ def create_card_on_board(
                 max_pos + 1, req.due_date, req.priority, req.label,
             ),
         )
+        _log(db, board["id"], user_id, "card_created", f"Created '{req.title}' in '{col_title}'", card_id)
     return {"id": card_id}
 
 
@@ -717,7 +744,7 @@ def delete_card(
     db=Depends(get_db),
 ):
     card = db.execute(
-        "SELECT c.column_id, c.position, b.user_id"
+        "SELECT c.column_id, c.position, c.title, c.board_id, b.user_id"
         " FROM cards c JOIN boards b ON c.board_id = b.id WHERE c.id = ?",
         (card_id,),
     ).fetchone()
@@ -730,6 +757,163 @@ def delete_card(
             " WHERE column_id = ? AND position > ?",
             (card["column_id"], card["position"]),
         )
+        _log(db, card["board_id"], user_id, "card_deleted", f"Deleted card '{card['title']}'")
+    return {"ok": True}
+
+
+@app.post("/api/cards/{card_id}/archive")
+def archive_card(
+    card_id: str,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    card = db.execute(
+        "SELECT c.id, c.title, c.board_id, b.user_id FROM cards c"
+        " JOIN boards b ON c.board_id = b.id WHERE c.id = ?",
+        (card_id,),
+    ).fetchone()
+    if not card or card["user_id"] != user_id:
+        raise HTTPException(status_code=404, detail="Card not found")
+    with db:
+        db.execute("UPDATE cards SET archived = 1 WHERE id = ?", (card_id,))
+        _log(db, card["board_id"], user_id, "card_archived", f"Archived card '{card['title']}'", card_id)
+    return {"ok": True}
+
+
+@app.post("/api/cards/{card_id}/unarchive")
+def unarchive_card(
+    card_id: str,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    card = db.execute(
+        "SELECT c.id, c.title, c.board_id, b.user_id FROM cards c"
+        " JOIN boards b ON c.board_id = b.id WHERE c.id = ?",
+        (card_id,),
+    ).fetchone()
+    if not card or card["user_id"] != user_id:
+        raise HTTPException(status_code=404, detail="Card not found")
+    with db:
+        db.execute("UPDATE cards SET archived = 0 WHERE id = ?", (card_id,))
+        _log(db, card["board_id"], user_id, "card_unarchived", f"Restored card '{card['title']}'", card_id)
+    return {"ok": True}
+
+
+@app.get("/api/boards/{board_id}/archived", response_model=list[ArchivedCard])
+def list_archived_cards(
+    board_id: int,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    _get_board_by_id(db, board_id, user_id)
+    rows = db.execute(
+        "SELECT c.id, c.title, col.title AS column_title"
+        " FROM cards c JOIN columns col ON c.column_id = col.id"
+        " WHERE c.board_id = ? AND c.archived = 1 ORDER BY c.id DESC",
+        (board_id,),
+    ).fetchall()
+    return [ArchivedCard(id=r["id"], title=r["title"], column_title=r["column_title"]) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Activity log
+# ---------------------------------------------------------------------------
+
+@app.get("/api/boards/{board_id}/activity", response_model=list[ActivityEntry])
+def get_activity(
+    board_id: int,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    _get_board_by_id(db, board_id, user_id)
+    rows = db.execute(
+        "SELECT al.id, u.username, al.action, al.details, al.card_id, al.created_at"
+        " FROM activity_log al JOIN users u ON al.user_id = u.id"
+        " WHERE al.board_id = ? ORDER BY al.created_at DESC LIMIT 100",
+        (board_id,),
+    ).fetchall()
+    return [
+        ActivityEntry(
+            id=row["id"],
+            username=row["username"],
+            action=row["action"],
+            details=row["details"],
+            card_id=row["card_id"],
+            created_at=row["created_at"],
+        )
+        for row in rows
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Card comments
+# ---------------------------------------------------------------------------
+
+@app.get("/api/cards/{card_id}/comments", response_model=list[CardComment])
+def get_comments(
+    card_id: str,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    _get_card_for_user(db, card_id, user_id)
+    rows = db.execute(
+        "SELECT cc.id, cc.card_id, u.username, cc.content, cc.created_at"
+        " FROM card_comments cc JOIN users u ON cc.user_id = u.id"
+        " WHERE cc.card_id = ? ORDER BY cc.created_at",
+        (card_id,),
+    ).fetchall()
+    return [
+        CardComment(
+            id=row["id"],
+            card_id=row["card_id"],
+            username=row["username"],
+            content=row["content"],
+            created_at=row["created_at"],
+        )
+        for row in rows
+    ]
+
+
+@app.post("/api/cards/{card_id}/comments", status_code=201, response_model=CardComment)
+def add_comment(
+    card_id: str,
+    req: CreateCommentRequest,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    card = _get_card_for_user(db, card_id, user_id)
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    comment_id = _new_id("cmt")
+    username = db.execute("SELECT username FROM users WHERE id = ?", (user_id,)).fetchone()["username"]
+    with db:
+        db.execute(
+            "INSERT INTO card_comments (id, card_id, user_id, content, created_at) VALUES (?, ?, ?, ?, ?)",
+            (comment_id, card_id, user_id, req.content, now),
+        )
+        _log(db, card["board_id"], user_id, "comment_added", f"Commented on card", card_id)
+    return CardComment(id=comment_id, card_id=card_id, username=username, content=req.content, created_at=now)
+
+
+@app.delete("/api/cards/{card_id}/comments/{comment_id}")
+def delete_comment(
+    card_id: str,
+    comment_id: str,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    _get_card_for_user(db, card_id, user_id)
+    comment = db.execute(
+        "SELECT id, user_id FROM card_comments WHERE id = ? AND card_id = ?",
+        (comment_id, card_id),
+    ).fetchone()
+    if not comment:
+        raise HTTPException(status_code=404, detail="Comment not found")
+    # Only the comment author (or board owner) can delete
+    if comment["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Cannot delete another user's comment")
+    with db:
+        db.execute("DELETE FROM card_comments WHERE id = ?", (comment_id,))
     return {"ok": True}
 
 
@@ -802,7 +986,7 @@ def duplicate_card(
 # ---------------------------------------------------------------------------
 
 def _get_card_for_user(db, card_id: str, user_id: int):
-    """Return card row after verifying ownership."""
+    """Return card row after verifying ownership. Allows archived cards."""
     card = db.execute(
         "SELECT c.id, c.board_id, b.user_id FROM cards c"
         " JOIN boards b ON c.board_id = b.id WHERE c.id = ?",

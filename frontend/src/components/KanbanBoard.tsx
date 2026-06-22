@@ -18,6 +18,9 @@ import { moveCard, type BoardData, type Card } from "@/lib/kanban";
 import {
   getBoardById,
   getBoardStats,
+  getBoardActivity,
+  listArchivedCards,
+  unarchiveCard,
   listUsers,
   renameColumn,
   createColumn,
@@ -28,6 +31,8 @@ import {
   moveCard as moveCardApi,
   type UserBrief,
   type BoardStats,
+  type ActivityEntry,
+  type ArchivedCard,
 } from "@/lib/api";
 
 type KanbanBoardProps = {
@@ -54,6 +59,10 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
   const [users, setUsers] = useState<UserBrief[]>([]);
   const [showStats, setShowStats] = useState(false);
   const [stats, setStats] = useState<BoardStats | null>(null);
+  const [showActivity, setShowActivity] = useState(false);
+  const [activity, setActivity] = useState<ActivityEntry[]>([]);
+  const [showArchived, setShowArchived] = useState(false);
+  const [archivedCards, setArchivedCards] = useState<ArchivedCard[]>([]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
@@ -76,6 +85,32 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
   const handleToggleStats = () => {
     if (!showStats) loadStats();
     setShowStats((s) => !s);
+  };
+
+  const handleToggleActivity = () => {
+    if (!showActivity) {
+      getBoardActivity(boardId).then(setActivity).catch(console.error);
+    }
+    setShowActivity((s) => !s);
+  };
+
+  const handleToggleArchived = () => {
+    if (!showArchived) {
+      listArchivedCards(boardId).then(setArchivedCards).catch(console.error);
+    }
+    setShowArchived((s) => !s);
+  };
+
+  const handleUnarchive = async (cardId: string) => {
+    try {
+      await unarchiveCard(cardId);
+      setArchivedCards((prev) => prev.filter((c) => c.id !== cardId));
+      // Reload the board to show the restored card
+      const updated = await getBoardById(boardId);
+      setBoard(updated);
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const cardsById = useMemo(() => board?.cards ?? {}, [board?.cards]);
@@ -241,6 +276,24 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
     });
   };
 
+  const handleArchiveCard = (cardId: string) => {
+    setBoard((prev) => {
+      if (!prev) return null;
+      const col = prev.columns.find((c) => c.cardIds.includes(cardId));
+      return {
+        ...prev,
+        cards: Object.fromEntries(Object.entries(prev.cards).filter(([id]) => id !== cardId)),
+        columns: prev.columns.map((c) =>
+          c.id === col?.id ? { ...c, cardIds: c.cardIds.filter((id) => id !== cardId) } : c
+        ),
+      };
+    });
+    // If the archived panel is open, refresh it
+    if (showArchived) {
+      listArchivedCards(boardId).then(setArchivedCards).catch(console.error);
+    }
+  };
+
   const handleWipChange = (columnId: string, limit: number | null) => {
     setBoard((prev) =>
       prev
@@ -306,6 +359,34 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
                 <rect x="10" y="1" width="3" height="12" rx="0.8" fill="currentColor"/>
               </svg>
               Stats
+            </button>
+            <button
+              onClick={handleToggleActivity}
+              className={`flex items-center gap-2 rounded-xl border px-4 py-2 text-xs font-semibold uppercase tracking-[0.15em] transition ${
+                showActivity
+                  ? "border-[var(--primary-blue)] bg-[var(--primary-blue)] text-white"
+                  : "border-[var(--stroke)] bg-[var(--surface)] text-[var(--gray-text)] hover:border-[var(--primary-blue)] hover:text-[var(--primary-blue)]"
+              }`}
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                <circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.4"/>
+                <path d="M7 4v3.5L9 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+              </svg>
+              Activity
+            </button>
+            <button
+              onClick={handleToggleArchived}
+              className={`flex items-center gap-2 rounded-xl border px-4 py-2 text-xs font-semibold uppercase tracking-[0.15em] transition ${
+                showArchived
+                  ? "border-amber-400 bg-amber-50 text-amber-700"
+                  : "border-[var(--stroke)] bg-[var(--surface)] text-[var(--gray-text)] hover:border-amber-400 hover:text-amber-700"
+              }`}
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                <rect x="1" y="4" width="12" height="8.5" rx="1.2" stroke="currentColor" strokeWidth="1.4"/>
+                <path d="M1 4h12M5 1.5h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+              </svg>
+              Archive
             </button>
             <button
               onClick={() => setShowFilter((f) => !f)}
@@ -380,6 +461,57 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
                 ))}
               </div>
             </div>
+          </div>
+        )}
+
+        {showActivity && (
+          <div className="rounded-2xl border border-[var(--stroke)] bg-white/80 px-5 py-4 shadow-[var(--shadow)] backdrop-blur">
+            <h2 className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">Recent Activity</h2>
+            {activity.length === 0 ? (
+              <p className="text-xs text-[var(--gray-text)]">No activity yet.</p>
+            ) : (
+              <div className="flex flex-col gap-2 max-h-48 overflow-y-auto">
+                {activity.map((entry) => (
+                  <div key={entry.id} className="flex items-start gap-3">
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--secondary-purple)] text-[9px] font-bold text-white">
+                      {entry.username.slice(0, 2).toUpperCase()}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-[var(--navy-dark)]">{entry.details}</p>
+                      <p className="text-[10px] text-[var(--gray-text)]">
+                        {entry.username} · {new Date(entry.created_at).toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {showArchived && (
+          <div className="rounded-2xl border border-[var(--stroke)] bg-white/80 px-5 py-4 shadow-[var(--shadow)] backdrop-blur">
+            <h2 className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">Archived Cards</h2>
+            {archivedCards.length === 0 ? (
+              <p className="text-xs text-[var(--gray-text)]">No archived cards.</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {archivedCards.map((card) => (
+                  <div key={card.id} className="flex items-center justify-between gap-3 rounded-xl border border-[var(--stroke)] bg-[var(--surface)] px-4 py-2">
+                    <div>
+                      <p className="text-sm font-semibold text-[var(--navy-dark)]">{card.title}</p>
+                      <p className="text-xs text-[var(--gray-text)]">{card.column_title}</p>
+                    </div>
+                    <button
+                      onClick={() => handleUnarchive(card.id)}
+                      className="shrink-0 rounded-lg border border-[var(--stroke)] px-3 py-1 text-xs font-semibold text-[var(--gray-text)] transition hover:border-emerald-400 hover:text-emerald-600"
+                    >
+                      Restore
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -497,6 +629,7 @@ export const KanbanBoard = ({ boardId, boardTitle, onBack, onLogout }: KanbanBoa
                     onDeleteCard={handleDeleteCard}
                     onUpdateCard={handleUpdateCard}
                     onDuplicateCard={handleDuplicateCard}
+                    onArchiveCard={handleArchiveCard}
                     onDeleteColumn={handleDeleteColumn}
                     onWipChange={handleWipChange}
                     canDelete={board.columns.length > 1}
