@@ -390,3 +390,162 @@ class TestAI:
         body = resp.json()
         assert body["reply"] == "not json at all"
         assert body["board"] is None
+
+    # --- Prompt content tests ---
+
+    def test_system_prompt_includes_column_positions(self, auth_client, monkeypatch):
+        """Board state sent to model must include position for every column."""
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+        with _mock_openai() as mock_cls:
+            auth_client.post("/api/ai", json={"message": "hi"})
+        messages = mock_cls.return_value.chat.completions.create.call_args.kwargs["messages"]
+        system_content = next(m["content"] for m in messages if m["role"] == "system")
+        for pos in range(5):
+            assert f'"position": {pos}' in system_content, f"Missing position {pos} in system prompt"
+
+    def test_system_prompt_includes_critical_warning(self, auth_client, monkeypatch):
+        """Prompt must include CRITICAL warning that reply text does not change the board."""
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+        with _mock_openai() as mock_cls:
+            auth_client.post("/api/ai", json={"message": "hi"})
+        messages = mock_cls.return_value.chat.completions.create.call_args.kwargs["messages"]
+        system_content = next(m["content"] for m in messages if m["role"] == "system")
+        assert "CRITICAL" in system_content
+        assert "board_update" in system_content
+
+    def test_null_board_update_returns_no_board(self, auth_client, monkeypatch):
+        """If model returns board_update: null, board in response must be None (nothing changed)."""
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+        with _mock_openai("I moved the cards!", board_update=None):
+            resp = auth_client.post("/api/ai", json={"message": "move cards left"})
+        assert resp.status_code == 200
+        assert resp.json()["board"] is None
+
+    # --- "Move all cards to the left" end-to-end ---
+
+    def test_ai_moves_all_cards_left(self, auth_client, monkeypatch):
+        """Full pipeline: AI returns correct move_cards operations and board is updated."""
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+        disc_id = _make_card(auth_client, "col-discovery", "In Discovery")
+        prog_id = _make_card(auth_client, "col-progress", "In Progress")
+        done_id = _make_card(auth_client, "col-done", "In Done")
+
+        update = {
+            "move_cards": [
+                {"card_id": disc_id, "column_id": "col-backlog", "position": 0},
+                {"card_id": prog_id, "column_id": "col-discovery", "position": 0},
+                {"card_id": done_id, "column_id": "col-review", "position": 0},
+            ]
+        }
+        with _mock_openai("Moved all cards one column to the left.", board_update=update):
+            resp = auth_client.post("/api/ai", json={"message": "move all cards to the left"})
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["reply"] == "Moved all cards one column to the left."
+        assert body["board"] is not None
+
+        col_by_id = {c["id"]: c for c in body["board"]["columns"]}
+
+        assert disc_id in col_by_id["col-backlog"]["cardIds"]
+        assert prog_id in col_by_id["col-discovery"]["cardIds"]
+        assert done_id in col_by_id["col-review"]["cardIds"]
+
+        assert disc_id not in col_by_id["col-discovery"]["cardIds"]
+        assert prog_id not in col_by_id["col-progress"]["cardIds"]
+        assert done_id not in col_by_id["col-done"]["cardIds"]
+
+    def test_ai_moves_all_cards_left_with_card_in_leftmost_column(self, auth_client, monkeypatch):
+        """Cards already in leftmost column must stay put; only the others move."""
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+        backlog_id = _make_card(auth_client, "col-backlog", "Already leftmost")
+        disc_id = _make_card(auth_client, "col-discovery", "One right of leftmost")
+
+        # Model correctly skips backlog card; moves discovery card left
+        update = {
+            "move_cards": [
+                {"card_id": disc_id, "column_id": "col-backlog", "position": 1},
+            ]
+        }
+        with _mock_openai("Moved cards left; backlog card was already leftmost.", board_update=update):
+            resp = auth_client.post("/api/ai", json={"message": "move all cards to the left"})
+
+        assert resp.status_code == 200
+        body = resp.json()
+        col_by_id = {c["id"]: c for c in body["board"]["columns"]}
+
+        assert backlog_id in col_by_id["col-backlog"]["cardIds"]
+        assert disc_id in col_by_id["col-backlog"]["cardIds"]
+        assert disc_id not in col_by_id["col-discovery"]["cardIds"]
+
+    def test_ai_model_hallucination_null_update_does_not_move_cards(self, auth_client, monkeypatch):
+        """If model claims to move cards in reply text but leaves board_update null, nothing changes."""
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+        card_id = _make_card(auth_client, "col-discovery", "Should not move")
+
+        # Model hallucinates: says it moved the card but provides no operations
+        with _mock_openai("Done! I moved all cards to the left.", board_update=None):
+            resp = auth_client.post("/api/ai", json={"message": "move all cards to the left"})
+
+        assert resp.status_code == 200
+        assert resp.json()["board"] is None  # no update means no board in response
+
+        # Verify card is still in discovery
+        board_resp = auth_client.get("/api/board")
+        col_by_id = {c["id"]: c for c in board_resp.json()["columns"]}
+        assert card_id in col_by_id["col-discovery"]["cardIds"]
+
+    def test_ai_json_wrapped_in_markdown_is_parsed_correctly(self, auth_client, monkeypatch):
+        """Model sometimes wraps JSON in ```json fences — backend must unwrap it."""
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+        card_id = _make_card(auth_client, "col-discovery", "To move")
+        import json as _j
+        raw_content = (
+            "```json\n"
+            + _j.dumps({
+                "reply": "Moved it.",
+                "board_update": {"move_cards": [{"card_id": card_id, "column_id": "col-backlog", "position": 0}]},
+            })
+            + "\n```"
+        )
+        choice = MagicMock()
+        choice.message.content = raw_content
+        completion = MagicMock()
+        completion.choices = [choice]
+        mock_client = MagicMock()
+        mock_client.chat.completions.create = AsyncMock(return_value=completion)
+        with patch("backend.main.AsyncOpenAI", return_value=mock_client):
+            resp = auth_client.post("/api/ai", json={"message": "move to backlog"})
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["board"] is not None
+        col_by_id = {c["id"]: c for c in body["board"]["columns"]}
+        assert card_id in col_by_id["col-backlog"]["cardIds"]
+
+    def test_ai_json_with_preamble_text_is_parsed_correctly(self, auth_client, monkeypatch):
+        """Model sometimes adds preamble text before JSON — backend must extract the object."""
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+        card_id = _make_card(auth_client, "col-discovery", "To move")
+        import json as _j
+        raw_content = (
+            "Here is the JSON response:\n"
+            + _j.dumps({
+                "reply": "Moved it.",
+                "board_update": {"move_cards": [{"card_id": card_id, "column_id": "col-backlog", "position": 0}]},
+            })
+        )
+        choice = MagicMock()
+        choice.message.content = raw_content
+        completion = MagicMock()
+        completion.choices = [choice]
+        mock_client = MagicMock()
+        mock_client.chat.completions.create = AsyncMock(return_value=completion)
+        with patch("backend.main.AsyncOpenAI", return_value=mock_client):
+            resp = auth_client.post("/api/ai", json={"message": "move to backlog"})
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["board"] is not None
+        col_by_id = {c["id"]: c for c in body["board"]["columns"]}
+        assert card_id in col_by_id["col-backlog"]["cardIds"]

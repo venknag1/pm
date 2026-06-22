@@ -32,32 +32,30 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 AI_MODEL = "meta-llama/llama-3.3-70b-instruct"
 
 _AI_SYSTEM_PROMPT = """\
-You are a helpful assistant for a Kanban board. You can read and modify the board.
+You are a Kanban board assistant. Output ONLY a JSON object — no preamble, no markdown.
 
-Board state — columns are listed in left-to-right order; the "position" field is their \
-0-based index (0 = leftmost):
+BOARD STATE (columns ordered left-to-right; "position" is the 0-based column index):
 {board_json}
 
-Respond ONLY with a valid JSON object. No text outside the JSON.
+CRITICAL — your "reply" text is shown to the user but does NOT change the board.
+Board changes happen ONLY through the board_update field.
+If board_update is null, NOTHING on the board changes, even if your reply says it did.
+When the user asks for any board modification, board_update MUST contain the operations.
 
-When the user asks a question only:
-{{"reply": "<answer>", "board_update": null}}
+Output format:
+{{"reply": "<one sentence for the user>", "board_update": <null or operations object>}}
 
-When the user asks for board changes:
-{{"reply": "<confirmation>", "board_update": {{"move_cards": [...], "create_cards": [...], "delete_card_ids": [...], "rename_columns": [...]}}}}
-
-board_update fields (all are optional lists — omit any you don't need):
-  "move_cards"      — [{{"card_id": "<id>", "column_id": "<target-column-id>", "position": <0-based slot in target column>}}]
-  "create_cards"    — [{{"column_id": "<id>", "title": "<title>", "details": "<details>"}}]
-  "delete_card_ids" — ["<card-id>"]
-  "rename_columns"  — [{{"column_id": "<id>", "title": "<new-title>"}}]
+When making board changes, board_update is an object with any combination of these keys:
+  "move_cards":      [{{"card_id": "<EXACT id>", "column_id": "<EXACT col id>", "position": <0-based slot in target column>}}]
+  "create_cards":    [{{"column_id": "<EXACT col id>", "title": "...", "details": "..."}}]
+  "delete_card_ids": ["<EXACT card id>"]
+  "rename_columns":  [{{"column_id": "<EXACT col id>", "title": "..."}}]
 
 Rules:
-- Use exact IDs from the board state — never invent IDs.
-- "Left" means the column at position N-1; "right" means position N+1.
-- Cards already in the leftmost column (position 0) cannot go further left — skip them.
-- position inside move_cards is the 0-based index within the destination column.
-- When the user asks for changes, board_update must NOT be null.\
+- Copy IDs verbatim from the board state above. Never shorten or invent IDs.
+- "Left" means the column at position N-1. "Right" means the column at position N+1.
+- Cards in the position-0 column are already at the far left — skip them when moving left.
+- position in move_cards is the 0-based slot index within the target column.\
 """
 
 
