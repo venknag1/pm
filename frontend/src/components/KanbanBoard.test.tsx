@@ -44,10 +44,10 @@ describe("KanbanBoard", () => {
     const columns = await screen.findAllByTestId(/^column-/);
     const column = columns[0];
 
-    await userEvent.click(within(column).getByRole("button", { name: /add a card/i }));
+    await userEvent.click(within(column).getByRole("button", { name: /add card/i }));
     await userEvent.type(within(column).getByPlaceholderText(/card title/i), "New card");
     await userEvent.type(within(column).getByPlaceholderText(/details/i), "Notes");
-    await userEvent.click(within(column).getByRole("button", { name: /add card/i }));
+    await userEvent.click(within(column).getByRole("button", { name: /^add card$/i }));
 
     expect(await screen.findByText("New card")).toBeInTheDocument();
 
