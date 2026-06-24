@@ -20,7 +20,12 @@
       "Bash(python -m pytest tests/test_api.py::TestGlobalSearch tests/test_api.py::TestBoardCompletion -v)",
       "Bash(python -m pytest tests/ -q --tb=no)",
       "Bash(python -m pytest tests/test_api.py -q --tb=short)",
-      "Bash(python -m pytest tests/test_api.py -q --tb=short -x)"
+      "Bash(python -m pytest tests/test_api.py -q --tb=short -x)",
+      "Bash(docker exec pm-app *)",
+      "Bash(./scripts/stop.sh)",
+      "Bash(docker rmi *)",
+      "Bash(docker build *)",
+      "Bash(docker run *)"
     ]
   }
 }
