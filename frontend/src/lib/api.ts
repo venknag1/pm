@@ -37,15 +37,7 @@ async function request(path: string, options?: RequestInit): Promise<Response> {
 }
 
 // --- Auth ---
-
-export async function login(username: string, password: string): Promise<{ username: string; is_admin: boolean }> {
-  const resp = await request("/api/auth/login", {
-    method: "POST",
-    body: JSON.stringify({ username, password }),
-  });
-  if (!resp.ok) throw new Error("Invalid credentials");
-  return resp.json();
-}
+// Login/logout/session live in ./auth; only registration is handled here.
 
 export async function register(username: string, password: string): Promise<void> {
   const resp = await request("/api/auth/register", {
@@ -56,16 +48,6 @@ export async function register(username: string, password: string): Promise<void
     const body = await resp.json().catch(() => ({}));
     throw new Error(body?.detail ?? "Registration failed");
   }
-}
-
-export async function logout(): Promise<void> {
-  await request("/api/auth/logout", { method: "POST" });
-}
-
-export async function getMe(): Promise<{ username: string; is_admin: boolean } | null> {
-  const resp = await request("/api/auth/me");
-  if (!resp.ok) return null;
-  return resp.json();
 }
 
 // --- Boards ---
@@ -109,13 +91,6 @@ export async function deleteBoard(boardId: number): Promise<void> {
 
 export async function getBoardById(boardId: number): Promise<BoardData> {
   const resp = await request(`/api/boards/${boardId}`);
-  if (!resp.ok) throw new Error("Failed to load board");
-  return resp.json();
-}
-
-// Legacy: get the user's first/primary board
-export async function getBoard(): Promise<BoardData> {
-  const resp = await request("/api/board");
   if (!resp.ok) throw new Error("Failed to load board");
   return resp.json();
 }

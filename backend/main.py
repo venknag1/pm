@@ -338,7 +338,6 @@ def _require_admin(user_id: int, db) -> None:
 
 
 def _log(db, board_id: int, user_id: int, action: str, details: str, card_id: str | None = None) -> None:
-    from datetime import datetime, timezone
     now = datetime.now(timezone.utc).isoformat()
     db.execute(
         "INSERT INTO activity_log (board_id, user_id, card_id, action, details, created_at)"
@@ -417,7 +416,6 @@ def register(req: RegisterRequest, db=Depends(get_db)):
     if existing:
         raise HTTPException(status_code=409, detail="Username already taken")
 
-    from datetime import datetime, timezone
     now = datetime.now(timezone.utc).isoformat()
 
     from .db import DEFAULT_COLUMNS
@@ -496,7 +494,6 @@ def create_board(
     user_id: int = Depends(get_current_user_id),
     db=Depends(get_db),
 ):
-    from datetime import datetime, timezone
     now = datetime.now(timezone.utc).isoformat()
     columns = BOARD_TEMPLATES.get(req.template or "", BOARD_TEMPLATES["default"])
     with db:
@@ -700,16 +697,11 @@ def rename_column(
 # Cards
 # ---------------------------------------------------------------------------
 
-@app.post("/api/cards", status_code=201)
-def create_card(
-    req: CreateCardRequest,
-    user_id: int = Depends(get_current_user_id),
-    db=Depends(get_db),
-):
-    board = _get_board(db, user_id)
-    if not db.execute(
-        "SELECT 1 FROM columns WHERE id = ? AND board_id = ?", (req.column_id, board["id"])
-    ).fetchone():
+def _create_card(db, board, req: CreateCardRequest, user_id: int) -> dict:
+    col = db.execute(
+        "SELECT title FROM columns WHERE id = ? AND board_id = ?", (req.column_id, board["id"])
+    ).fetchone()
+    if not col:
         raise HTTPException(status_code=404, detail="Column not found")
 
     max_pos = db.execute(
@@ -718,7 +710,6 @@ def create_card(
     ).fetchone()[0]
 
     card_id = _new_id("card")
-    col_title = db.execute("SELECT title FROM columns WHERE id = ?", (req.column_id,)).fetchone()["title"]
     with db:
         db.execute(
             "INSERT INTO cards (id, board_id, column_id, title, details, position,"
@@ -728,8 +719,18 @@ def create_card(
                 max_pos + 1, req.due_date, req.priority, req.label,
             ),
         )
-        _log(db, board["id"], user_id, "card_created", f"Created '{req.title}' in '{col_title}'", card_id)
+        _log(db, board["id"], user_id, "card_created", f"Created '{req.title}' in '{col['title']}'", card_id)
     return {"id": card_id}
+
+
+@app.post("/api/cards", status_code=201)
+def create_card(
+    req: CreateCardRequest,
+    user_id: int = Depends(get_current_user_id),
+    db=Depends(get_db),
+):
+    board = _get_board(db, user_id)
+    return _create_card(db, board, req, user_id)
 
 
 @app.post("/api/boards/{board_id}/cards", status_code=201)
@@ -740,29 +741,7 @@ def create_card_on_board(
     db=Depends(get_db),
 ):
     board = _get_board_by_id(db, board_id, user_id)
-    if not db.execute(
-        "SELECT 1 FROM columns WHERE id = ? AND board_id = ?", (req.column_id, board["id"])
-    ).fetchone():
-        raise HTTPException(status_code=404, detail="Column not found")
-
-    max_pos = db.execute(
-        "SELECT COALESCE(MAX(position), -1) FROM cards WHERE column_id = ?",
-        (req.column_id,),
-    ).fetchone()[0]
-
-    card_id = _new_id("card")
-    col_title = db.execute("SELECT title FROM columns WHERE id = ?", (req.column_id,)).fetchone()["title"]
-    with db:
-        db.execute(
-            "INSERT INTO cards (id, board_id, column_id, title, details, position,"
-            " due_date, priority, label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                card_id, board["id"], req.column_id, req.title, req.details,
-                max_pos + 1, req.due_date, req.priority, req.label,
-            ),
-        )
-        _log(db, board["id"], user_id, "card_created", f"Created '{req.title}' in '{col_title}'", card_id)
-    return {"id": card_id}
+    return _create_card(db, board, req, user_id)
 
 
 @app.patch("/api/cards/{card_id}")
@@ -1126,7 +1105,6 @@ def add_comment(
     db=Depends(get_db),
 ):
     card = _get_card_for_user(db, card_id, user_id)
-    from datetime import datetime, timezone
     now = datetime.now(timezone.utc).isoformat()
     comment_id = _new_id("cmt")
     username = db.execute("SELECT username FROM users WHERE id = ?", (user_id,)).fetchone()["username"]
